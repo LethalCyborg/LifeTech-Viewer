@@ -578,6 +578,20 @@ impl<'a> Floater<'a> {
         // Ctrl+Shift+W closes every window.
         let mut close = super::close_key::take(ctx, egui::Id::unique(self.id)) || close_asked(ctx, self.id);
         super::close_key::shown(ctx, egui::Id::unique(self.id));
+        // A window not drawn on the last frame has just opened (a menu, a
+        // button, a shortcut): it comes to the front, where the keyboard and
+        // Ctrl+W find it (LLFloater::openFloater → setVisibleAndFrontmost).
+        // egui would keep a closed window's old place in the stack, behind
+        // the others.
+        {
+            let frame = ctx.cumulative_frame_nr();
+            let drawn = egui::Id::unique(self.id).with("last_drawn");
+            let last = ctx.data(|d| d.get_temp::<u64>(drawn));
+            ctx.data_mut(|d| d.insert_temp(drawn, frame));
+            if just_opened(last, frame) {
+                ctx.move_to_top(egui::LayerId::new(self.order, egui::Id::unique(self.id)));
+            }
+        }
         // the toolbar button, a menu entry or a shortcut asked to expand it
         let expand_asked = ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::unique(self.id).with(EXPAND)));
         let mut toggle_min = minimized && expand_asked.unwrap_or(false);
@@ -1347,6 +1361,12 @@ pub fn floater_holds_keyboard(ctx: &egui::Context, id: &str) -> bool {
         return false;
     };
     ctx.read_response(focus).is_some_and(|response| response.layer_id.id == want)
+}
+
+/// A floater last drawn on frame `last` (None: never) and drawn again on
+/// `frame` has just opened: it was not there on the frame before.
+fn just_opened(last: Option<u64>, frame: u64) -> bool {
+    last.is_none_or(|f| f + 1 < frame)
 }
 
 /// Bring the floater `id` to the front, expanding it when it is minimized
@@ -3220,5 +3240,21 @@ mod maturity_tests {
             let (got, _, _) = maturity_style(&p, super::super::bars::maturity_name(r)).unwrap();
             assert_eq!(got, letter);
         }
+    }
+}
+
+#[cfg(test)]
+mod opening_tests {
+    use super::just_opened;
+
+    #[test]
+    fn a_window_back_after_a_gap_comes_to_the_front() {
+        // first time, or closed for a frame or more: it just opened
+        assert!(just_opened(None, 10));
+        assert!(just_opened(Some(5), 10));
+        assert!(just_opened(Some(8), 10));
+        // drawn on the frame before: it stays where it is in the stack
+        assert!(!just_opened(Some(9), 10));
+        assert!(!just_opened(Some(10), 10));
     }
 }

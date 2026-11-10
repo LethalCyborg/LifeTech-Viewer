@@ -93,6 +93,25 @@ pub fn begin(ctx: &egui::Context) {
     state.extra.retain(|(_, at)| at + 1 >= frame);
     state.target = None;
     state.all = false;
+    // a dialog on top: Ctrl+W is its Escape, so it closes as Escape would
+    // close it (Cancel) and is ignored by one that Escape leaves open; the
+    // key never reaches a field of the dialog (erasing a word) nor a window
+    // behind it
+    if ctx.memory(|m| m.top_modal_layer()).is_some() {
+        let mods = egui::Modifiers::COMMAND;
+        if pressed_alone(ctx, egui::Key::W, mods) {
+            ctx.input_mut(|i| {
+                i.consume_key(mods, egui::Key::W);
+                i.events.push(egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            });
+        }
+    }
     // held down, it closes once, not on each repeat
     if ctx.memory(|m| m.top_modal_layer()).is_none() {
         let shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
@@ -412,6 +431,32 @@ mod tests {
             &mut closed,
         );
         assert!(closed);
+    }
+
+    #[test]
+    fn ctrl_w_over_a_dialog_is_its_escape() {
+        let mut frames = Frames::new();
+        let mut text = String::from("two words");
+        let mut closed = false;
+        let mut w_seen = false;
+        let window = Id::unique("behind");
+        for events in [Vec::new(), vec![key(egui::Key::W, egui::Modifiers::COMMAND)]] {
+            frames.run(events, |ui| {
+                let ctx = ui.ctx().clone();
+                begin(&ctx);
+                w_seen |= w_left(&ctx);
+                egui::Window::new("behind").id(window).show(&ctx, |_| {});
+                shown(&ctx, window);
+                assert!(!take(&ctx, window), "the window behind the dialog stays");
+                let r = egui::Modal::new(Id::unique("dialog")).show(&ctx, |ui| {
+                    ui.add(egui::TextEdit::singleline(&mut text));
+                });
+                closed |= r.should_close();
+            });
+        }
+        assert!(closed, "the dialog closes as Escape closes it");
+        assert!(!w_seen, "its field never erases a word");
+        assert_eq!(text, "two words");
     }
 
     #[test]
