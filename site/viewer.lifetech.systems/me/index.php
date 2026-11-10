@@ -89,7 +89,7 @@ $files = $signedIn ? ltv_downloads() : [];
       <div>
         <span class="eyebrow">Personal build</span>
         <h2 class="title">Your downloads</h2>
-        <p>Your own LifeTech Viewer, with LifeTech Sync. The newest version is at the top.</p>
+        <p>Your own LifeTech Viewer. The newest version is at the top.</p>
       </div>
     </div>
 
@@ -122,8 +122,8 @@ $files = $signedIn ? ltv_downloads() : [];
         <p>In Applications, right-click LifeTech Viewer and choose <b>Open</b>, then <b>Open</b> again. If macOS still refuses, go to System Settings › Privacy &amp; Security and click <b>Open Anyway</b>.</p>
       </div>
       <div class="step">
-        <h3>Log in and sync</h3>
-        <p>Log in with your account. Your chats, settings and places follow you between your computers.</p>
+        <h3>Log in</h3>
+        <p>Log in with your Second Life account as usual. LifeTech Sync, which carries your chats, settings and places between computers, comes with a later build.</p>
       </div>
     </div>
     <p class="note">This build is for Macs with Apple Silicon (M1 or later). It is signed for your use only, which is why macOS asks before the first start.</p>
