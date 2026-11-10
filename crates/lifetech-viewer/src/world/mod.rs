@@ -2068,6 +2068,22 @@ impl World {
         self.push_chat(line);
     }
 
+    /// A notice in nearby chat that is not chat: shown and kept in the
+    /// transcript, but never unread nor counted on the badge (a friend
+    /// coming online or going offline).
+    pub fn quiet_notice(&mut self, text: impl Into<String>, topic: notice_topics::Topic) {
+        let line = ChatLine {
+            time: SystemTime::now(),
+            from: String::new(),
+            text: text.into(),
+            kind: ChatKind::System,
+            source: Uuid::nil(),
+            origin: Origin::Live,
+        };
+        self.notice_topics.note(&line, topic);
+        self.nearby_push(line);
+    }
+
     /// A notice of the viewer in a conversation (a call, an automatic
     /// reply), about `topic`, never unread.
     pub fn conversation_notice(&mut self, session: Uuid, text: impl Into<String>, topic: notice_topics::Topic) {
@@ -5243,8 +5259,15 @@ impl World {
                 self.session_system(id, n.clone());
             }
             // the toast of LLNotificationTipHandler (ChatOnlineNotification),
-            // never during login, in do not disturb nor for a blocked resident
-            if self.notifications.toasts.presence && self.notifications.started && !self.status.dnd && !self.mutes.is_muted_id(&id) {
+            // never during login, in do not disturb nor for a blocked
+            // resident; LifeTech: nor when the notice goes to nearby chat
+            // (OnlineOfflinetoNearbyChat), which already says it
+            if self.notifications.toasts.presence
+                && !self.notifications.toasts.presence_in_chat
+                && self.notifications.started
+                && !self.status.dnd
+                && !self.mutes.is_muted_id(&id)
+            {
                 let notification = self.notifications.push_presence(id, n.clone(), online);
                 self.notifications
                     .link_name(notification, self.social.name_of(&id), notifications::NameTarget::Avatar(id));
@@ -5259,7 +5282,8 @@ impl World {
                 self.ask_attention(attention::Cause::Notice, Some(notice));
             }
             // the line of nearby chat (OnlineOfflinetoNearbyChat), only when
-            // asked for: the toast already says it
+            // asked for; LifeTech: a status, not chat, so never unread nor
+            // on the badge
             if self.notifications.toasts.presence_in_chat {
                 // checked as nearby chat (LLAvatarTracker::processNotify),
                 // unless notices are kept quiet (#741)
@@ -5267,7 +5291,7 @@ impl World {
                     let from = self.social.name_of(&id);
                     self.keyword_alert(id, &from, &n, true, attention::Open::NearbyChat);
                 }
-                self.system_notice(n, notice_topics::Topic::People);
+                self.quiet_notice(n, notice_topics::Topic::People);
             }
         }
     }
