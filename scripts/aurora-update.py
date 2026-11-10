@@ -33,7 +33,8 @@ REMOTE_URL = "https://github.com/Aurora-Viewer/Aurora-Viewer.git"
 BRANCH = "aurora"
 TRAILER = "Aurora-Commit:"
 
-# ---- the renaming, exactly as LifeTech Viewer's first commit made it ------
+# ---- the renaming, exactly as LifeTech Viewer's first commit made it, then
+# ---- cargo fmt ------------------------------------------------------------
 CRATES = ["assets", "audio", "i18n", "llsd", "media", "msg", "net", "prim", "render", "updater", "version", "viewer", "voice"]
 # names that keep Aurora's spelling: its website and its media plugin pack
 PROTECT = ["aurora-viewer.org", "aurora-media-plugins", "Aurora-Media-Plugins"]
@@ -81,6 +82,12 @@ def rename_tree(root):
     desktop = os.path.join(root, "packaging", "linux", "aurora-viewer.desktop")
     if os.path.exists(desktop):
         os.rename(desktop, os.path.join(root, "packaging", "linux", "lifetech-viewer.desktop"))
+    # the longer names wrap some lines differently: formatted as LifeTech's
+    # code is (rustfmt.toml), or every such line would clash in a merge
+    cargo = shutil.which("cargo") or os.path.expanduser("~/.cargo/bin/cargo")
+    run = subprocess.run([cargo, "fmt", "--all"], cwd=root, capture_output=True, text=True)
+    if run.returncode != 0:
+        sys.exit(f"cargo fmt failed on the renamed copy:\n{run.stderr.strip()}")
 
 
 # ---- git -----------------------------------------------------------------
