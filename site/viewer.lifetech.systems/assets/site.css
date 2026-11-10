@@ -154,3 +154,5 @@ input[type=password]:focus { outline: none; border-color: var(--brand); box-shad
 @media (max-width: 820px) { .steps { grid-template-columns: 1fr; } }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+#download .files { margin-bottom: 18px; }
+#download p.note { color: var(--dim); margin: 0 0 22px; font-size: 14px; }

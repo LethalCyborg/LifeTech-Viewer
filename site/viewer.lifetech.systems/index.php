@@ -59,7 +59,7 @@ $builds = ltv_builds();
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/site.css?v=4">
+<link rel="stylesheet" href="/assets/site.css?v=5">
 <meta property="og:title" content="LifeTech Viewer">
 <meta property="og:description" content="A Second Life viewer made for newcomers, by LifeTech Systems.">
 <meta property="og:image" content="https://viewer.lifetech.systems/assets/logo.png">
