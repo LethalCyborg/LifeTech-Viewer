@@ -17,6 +17,11 @@
 //! conversation shown instead (LLMultiFloater::closeDockedFloater); Close
 //! All still closes that window. The mini-map has no title bar, so it is
 //! not in the frontmost list ([`shown_extra`]) and only Close All takes it.
+//!
+//! A script's dialog (llDialog, llTextBox) floats over the windows: Ctrl+W
+//! ignores the newest one ([`shown_prompt`]), but only once it has been on
+//! screen for [`PROMPT_GRACE`] seconds; sooner, the key does nothing, so a
+//! press meant for something else never throws away a dialog not yet read.
 
 use crate::keybinds::{Input, Mods};
 use egui::{Id, Order};
@@ -41,11 +46,16 @@ pub fn take_native_key(key: &NativeKey, code: KeyCode, mods: Mods, down: &mut Ha
     }
 }
 
+/// Seconds a script dialog stays on screen before Ctrl+W may ignore it.
+pub const PROMPT_GRACE: f64 = 5.0;
+
 /// The windows drawn on the last frame, the one Ctrl+W closes this frame,
 /// and whether Ctrl+Shift+W closes every window drawn then.
 #[derive(Clone, Default)]
 struct State {
     shown: Vec<(Id, u64)>,
+    /// Script dialogs drawn: (id, last frame, time first shown).
+    prompts: Vec<(Id, u64, f64)>,
     /// Windows outside the frontmost list (the mini-map). Close All only.
     extra: Vec<(Id, u64)>,
     target: Option<(Id, u64)>,
@@ -78,6 +88,22 @@ fn note(ctx: &egui::Context, id: Id, extra: bool) {
     });
 }
 
+/// A script dialog `id` is drawn this frame: Ctrl+W may ignore it once it
+/// has been shown for [`PROMPT_GRACE`] seconds; Ctrl+Shift+W closes it
+/// with the windows.
+pub fn shown_prompt(ctx: &egui::Context, id: Id) {
+    note(ctx, id, true);
+    let (frame, now) = (ctx.cumulative_frame_nr(), ctx.input(|i| i.time));
+    ctx.data_mut(|d| {
+        let state = d.get_temp_mut_or_default::<State>(state_id());
+        state.prompts.retain(|(_, at, _)| at + 1 >= frame);
+        match state.prompts.iter_mut().find(|(other, _, _)| *other == id) {
+            Some(entry) => entry.1 = frame,
+            None => state.prompts.push((id, frame, now)),
+        }
+    });
+}
+
 fn listed(list: &[(Id, u64)], id: Id, frame: u64) -> bool {
     list.iter().any(|(other, at)| *other == id && at + 1 >= frame)
 }
@@ -91,6 +117,7 @@ pub fn begin(ctx: &egui::Context) {
     let mut state = ctx.data(|d| d.get_temp::<State>(state_id())).unwrap_or_default();
     state.shown.retain(|(_, at)| at + 1 >= frame);
     state.extra.retain(|(_, at)| at + 1 >= frame);
+    state.prompts.retain(|(_, at, _)| at + 1 >= frame);
     state.target = None;
     state.all = false;
     // a dialog on top: Ctrl+W is its Escape, so it closes as Escape would
@@ -118,6 +145,15 @@ pub fn begin(ctx: &egui::Context) {
         if pressed_alone(ctx, egui::Key::W, shift) && (!state.shown.is_empty() || !state.extra.is_empty()) {
             ctx.input_mut(|i| i.consume_key(shift, egui::Key::W));
             state.all = true;
+        } else if pressed_alone(ctx, egui::Key::W, egui::Modifiers::COMMAND)
+            && let Some(&(id, _, since)) = state.prompts.iter().max_by(|a, b| a.2.total_cmp(&b.2))
+        {
+            // a script dialog floats over the windows: the newest one, once
+            // it has been read for a while; sooner the key does nothing
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::W));
+            if ctx.input(|i| i.time) - since >= PROMPT_GRACE {
+                state.target = Some((id, frame));
+            }
         } else if pressed_alone(ctx, egui::Key::W, egui::Modifiers::COMMAND) {
             // back to front
             let front = ctx.memory(|m| {
@@ -431,6 +467,49 @@ mod tests {
             &mut closed,
         );
         assert!(closed);
+    }
+
+    #[test]
+    fn ctrl_w_ignores_a_script_dialog_only_after_five_seconds() {
+        let mut frames = Frames::new();
+        let prompt = Id::unique("script_prompt");
+        let window = Id::unique("window");
+        let (mut prompt_closed, mut window_closed) = (0, 0);
+        // frames 1/60 s apart: a press at about 1 s, then at about 6 s
+        for n in 0..400 {
+            let events = match n {
+                60 | 360 => vec![key(egui::Key::W, egui::Modifiers::COMMAND)],
+                // released in between, or the next press is a repeat
+                90 => vec![egui::Event::Key {
+                    key: egui::Key::W,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                _ => Vec::new(),
+            };
+            frames.run(events, |ui| {
+                let ctx = ui.ctx().clone();
+                begin(&ctx);
+                egui::Window::new("window").id(window).show(&ctx, |_| {});
+                shown(&ctx, window);
+                if take(&ctx, window) {
+                    window_closed += 1;
+                }
+                if prompt_closed == 0 {
+                    shown_prompt(&ctx, prompt);
+                    if take(&ctx, prompt) {
+                        prompt_closed = n;
+                    }
+                }
+            });
+            if n == 61 {
+                assert_eq!((prompt_closed, window_closed), (0, 0), "too soon: nothing closes");
+            }
+        }
+        assert_eq!(prompt_closed, 360, "after five seconds the dialog goes");
+        assert_eq!(window_closed, 0, "the window behind stays");
     }
 
     #[test]

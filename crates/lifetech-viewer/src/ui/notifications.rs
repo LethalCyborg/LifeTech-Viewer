@@ -770,14 +770,15 @@ pub(super) fn card(
     out
 }
 
-/// Script prompts are windows for Close All in both notification styles.
+/// Script prompts close with Close All in both notification styles, and
+/// with Ctrl+W once shown for a few seconds (`close_key::shown_prompt`).
 /// Dismissing one uses the existing ignore-without-reply response.
 pub(super) fn close_script_prompt(ctx: &egui::Context, n: &Notification) -> bool {
     if !matches!(n.data, Data::Dialog { .. } | Data::TextBox { .. }) {
         return false;
     }
     let id = egui::Id::NULL.with(("script_prompt", n.id));
-    super::close_key::shown_extra(ctx, id);
+    super::close_key::shown_prompt(ctx, id);
     super::close_key::take(ctx, id)
 }
 
