@@ -249,36 +249,62 @@ pub fn avatar_name(world: &World, id: &Uuid) -> String {
         .unwrap_or_else(|| "…".into())
 }
 
-/// LLWorldMapView::drawAvatar: a dot, with a cap above / below when the
-/// avatar is more than 7 m higher / lower than the camera.
-pub fn draw_avatar(painter: &egui::Painter, c: Pos2, r: f32, color: Color32, dz: Option<f32>) {
-    let outline = Stroke::new(1.0, Color32::from_black_alpha(160));
-    match dz {
-        Some(d) if d > HEIGHT_THRESHOLD => {
-            painter.circle(c, r * 0.8, color, outline);
-            let t = [
-                pos2(c.x - r, c.y - r * 0.55),
-                pos2(c.x + r, c.y - r * 0.55),
-                pos2(c.x, c.y - r * 1.75),
-            ];
-            painter.add(egui::Shape::convex_polygon(t.to_vec(), color, outline));
-        }
-        Some(d) if d < -HEIGHT_THRESHOLD => {
-            painter.circle(c, r * 0.8, color, outline);
-            let t = [
-                pos2(c.x - r, c.y + r * 0.55),
-                pos2(c.x, c.y + r * 1.75),
-                pos2(c.x + r, c.y + r * 0.55),
-            ];
-            painter.add(egui::Shape::convex_polygon(t.to_vec(), color, outline));
-        }
-        Some(_) => {
-            painter.circle(c, r, color, outline);
-        }
-        None => {
-            painter.circle(c, r, color.gamma_multiply(0.55), Stroke::new(1.0, color));
+/// Where an avatar is against the camera's height, for its dot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeightMark {
+    /// More than 7 m higher (LLWorldMapView::drawAvatar's threshold).
+    Above,
+    /// More than 7 m lower.
+    Below,
+    Level,
+    /// Height unknown (a coarse location, camera above 1020 m).
+    Unknown,
+}
+
+impl HeightMark {
+    pub fn of(dz: Option<f32>) -> HeightMark {
+        match dz {
+            Some(d) if d > HEIGHT_THRESHOLD => HeightMark::Above,
+            Some(d) if d < -HEIGHT_THRESHOLD => HeightMark::Below,
+            Some(_) => HeightMark::Level,
+            None => HeightMark::Unknown,
         }
     }
+}
+
+/// Smallest radius of a dot that carries a ^ or v, so the mark stays legible.
+const MARKED_DOT_RADIUS: f32 = 6.0;
+
+/// An avatar's dot (LLWorldMapView::drawAvatar). LifeTech: an avatar more
+/// than 7 m higher than the camera has a ^ inside its dot, one more than 7 m
+/// lower a v, instead of the Legacy Viewer's cap above or below the dot.
+pub fn draw_avatar(painter: &egui::Painter, c: Pos2, r: f32, color: Color32, dz: Option<f32>) {
+    let outline = Stroke::new(1.0, Color32::from_black_alpha(160));
+    let mark = HeightMark::of(dz);
+    let up = match mark {
+        HeightMark::Above => 1.0,
+        HeightMark::Below => -1.0,
+        HeightMark::Level => {
+            painter.circle(c, r, color, outline);
+            return;
+        }
+        HeightMark::Unknown => {
+            painter.circle(c, r, color.gamma_multiply(0.55), Stroke::new(1.0, color));
+            return;
+        }
+    };
+    let r = r.max(MARKED_DOT_RADIUS);
+    painter.circle(c, r, color, outline);
+    // the chevron in the colour that reads on the dot
+    let [cr, cg, cb, _] = color.to_array();
+    let light = 0.299 * f32::from(cr) + 0.587 * f32::from(cg) + 0.114 * f32::from(cb) > 150.0;
+    let ink = if light { Color32::from_black_alpha(230) } else { Color32::WHITE };
+    let (w, h) = (r * 0.5, r * 0.28 * up);
+    let tip = pos2(c.x, c.y - h - r * 0.04 * up);
+    painter.add(egui::Shape::line(
+        vec![pos2(c.x - w, c.y + h), tip, pos2(c.x + w, c.y + h)],
+        Stroke::new((r * 0.24).max(1.4), ink),
+    ));
 }
 
 /// Our own marker (map_avatar_you_32): ringed dot.
@@ -1579,5 +1605,46 @@ mod beacon_tests {
         track.pending = false;
         track.invalid = true;
         assert!(!hit.contains(hit.rect.center(), &track));
+    }
+}
+
+#[cfg(test)]
+mod height_mark_tests {
+    use super::*;
+
+    #[test]
+    fn avatars_past_seven_metres_get_a_chevron_and_the_others_a_plain_dot() {
+        assert_eq!(HeightMark::of(Some(7.5)), HeightMark::Above);
+        assert_eq!(HeightMark::of(Some(f32::MAX)), HeightMark::Above);
+        assert_eq!(HeightMark::of(Some(-7.5)), HeightMark::Below);
+        assert_eq!(HeightMark::of(Some(7.0)), HeightMark::Level);
+        assert_eq!(HeightMark::of(Some(-3.0)), HeightMark::Level);
+        assert_eq!(HeightMark::of(None), HeightMark::Unknown);
+    }
+
+    #[test]
+    fn the_chevron_sits_inside_the_dot() {
+        let ctx = egui::Context::default();
+        let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.painter();
+            draw_avatar(painter, pos2(50.0, 50.0), 3.5, Color32::from_rgb(0, 200, 0), Some(20.0));
+            draw_avatar(painter, pos2(80.0, 50.0), 3.5, Color32::from_rgb(0, 200, 0), Some(-20.0));
+        });
+        let mut dots = Vec::new();
+        let mut marks = Vec::new();
+        for shape in &out.shapes {
+            match &shape.shape {
+                egui::Shape::Circle(c) => dots.push(*c),
+                egui::Shape::Path(path) => marks.push(path.points.clone()),
+                _ => {}
+            }
+        }
+        assert_eq!((dots.len(), marks.len()), (2, 2), "one dot and one chevron each, no cap");
+        for (dot, points) in dots.iter().zip(&marks) {
+            assert!(dot.radius >= MARKED_DOT_RADIUS);
+            assert!(points.iter().all(|p| p.distance(dot.center) < dot.radius), "inside the dot");
+        }
+        // ^ for above: the middle point is the highest; v for below, the lowest
+        assert!(marks[0][1].y < marks[0][0].y && marks[1][1].y > marks[1][0].y);
     }
 }
