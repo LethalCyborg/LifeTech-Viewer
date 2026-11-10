@@ -127,6 +127,12 @@ $files = $signedIn ? ltv_downloads() : [];
       </div>
     </div>
     <p class="note">This build is for Macs with Apple Silicon (M1 or later). It is signed for your use only, which is why macOS asks before the first start.</p>
+
+    <h3 class="sect">On Linux</h3>
+    <p>Unpack the <code>.tar.gz</code> anywhere and start <code>lifetech-viewer</code>; <code>lifetech-viewer.desktop</code> and the icon beside it add it to your menu.</p>
+
+    <h3 class="sect">Updates</h3>
+    <p>Once LifeTech Sync is on, the viewer checks here when it starts. When a newer build is published it offers <b>Update</b>: it downloads it, installs it in place of the old one and restarts. No need to come back to this page.</p>
   </div>
 </main>
 <?php endif; ?>

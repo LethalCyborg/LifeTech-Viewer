@@ -11,6 +11,13 @@ declare(strict_types=1);
 //   GET  api.php?op=get&account=<uuid>&id=<id>        → the blob's bytes, X-LTS-Version
 //   POST api.php?op=put&account=<uuid>&id=<id>&base=<v>  body: the blob's bytes
 //        → {"v":n}; 409 {"v":current} when base is not the current version
+//   GET  api.php?op=update&account=<uuid>&platform=<p>  → {"version","file","size","sha256"}
+//        or {"version":null}: the newest personal build for a platform
+//   GET  api.php?op=fetch&account=<uuid>&platform=<p>&file=<name>  → its bytes
+//
+// Builds are the files of ltv-private/downloads named
+// LifeTech-Viewer-personal-<version>-<platform>.<ext> with a <file>.sha256
+// beside them (the same files the /me/ page offers).
 //
 // The token is derived from the account's sync passphrase in the viewer;
 // only its SHA-256 is kept here. An account exists once registered, and
@@ -25,6 +32,7 @@ const LTS_MAX_TOTAL = 2 * 1024 * 1024 * 1024;
 const LTS_MAX_BLOBS = 20000;
 const LTS_FAILS = 10;           // bad tokens per address in LTS_FAIL_WINDOW
 const LTS_FAIL_WINDOW = 15 * 60;
+const LTS_PLATFORMS = ['macos-arm64' => 'dmg', 'linux-x64' => 'tar.gz'];
 
 // files and folders the site's group can manage too (deploys, cleanup)
 umask(0007);
@@ -164,6 +172,27 @@ function lts_with_index(string $dir, callable $change): mixed
     return $result;
 }
 
+/// The newest build of a platform: [name, path, sha256], or null.
+function lts_build(string $platform): ?array
+{
+    $ext = LTS_PLATFORMS[$platform] ?? null;
+    if ($ext === null) {
+        lts_fail(400, 'bad platform');
+    }
+    $dir = lts_private() . '/downloads';
+    $best = null;
+    foreach (glob($dir . '/LifeTech-Viewer-personal-*-' . $platform . '.' . $ext) ?: [] as $path) {
+        $sum = is_file("$path.sha256") ? strtok((string) file_get_contents("$path.sha256"), " \t\n") : false;
+        if (!is_file($path) || !is_string($sum) || !preg_match('/^[0-9a-f]{64}$/', $sum)) {
+            continue;
+        }
+        if ($best === null || filemtime($path) > filemtime($best[1])) {
+            $best = [basename($path), $path, $sum];
+        }
+    }
+    return $best;
+}
+
 $op = (string) ($_GET['op'] ?? '');
 if ($op === 'ping') {
     lts_json(['service' => 'lifetech-sync', 'version' => 1]);
@@ -277,6 +306,37 @@ switch ($op) {
             lts_fail(500, 'write failed');
         }
         lts_json($result);
+
+    case 'update':
+        lts_authorised($account);
+        $build = lts_build((string) ($_GET['platform'] ?? ''));
+        if ($build === null) {
+            lts_json(['version' => null]);
+        }
+        [$name, $path, $sum] = $build;
+        $prefix = 'LifeTech-Viewer-personal-';
+        $suffix = '-' . $_GET['platform'] . '.' . LTS_PLATFORMS[$_GET['platform']];
+        lts_json([
+            'version' => substr($name, strlen($prefix), -strlen($suffix)),
+            'file' => $name,
+            'size' => filesize($path),
+            'sha256' => $sum,
+        ]);
+
+    case 'fetch':
+        lts_authorised($account);
+        $build = lts_build((string) ($_GET['platform'] ?? ''));
+        if ($build === null || $build[0] !== (string) ($_GET['file'] ?? '')) {
+            lts_fail(404, 'no such build');
+        }
+        @set_time_limit(0);
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        header('Content-Type: application/octet-stream');
+        header('Content-Length: ' . filesize($build[1]));
+        readfile($build[1]);
+        exit;
 
     default:
         lts_fail(400, 'unknown op');
