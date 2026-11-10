@@ -169,10 +169,8 @@ fn friends_announced_during_login_get_no_toast_but_keep_their_line() {
     w.flush_online_notices();
     assert!(!w.notifications.list.iter().any(|n| n.kind == Kind::Presence));
     assert!(w.chat.iter().any(|l| l.kind == ChatKind::System && l.text.contains("Jane Doe")));
-    // once the world is shown, a friend logging in gets their toast (with
-    // the nearby chat line off: on, the line replaces it)
+    // once the world is shown, a friend logging in gets their toast
     w.notifications.started = true;
-    w.notifications.toasts.presence_in_chat = false;
     w.social.set_online(&[TOM], true);
     w.flush_online_notices();
     let toasts: Vec<_> = w.notifications.list.iter().filter(|n| n.kind == Kind::Presence).collect();
@@ -195,12 +193,8 @@ fn the_nearby_chat_line_of_a_friend_follows_its_own_preference() {
         w.flush_online_notices();
         let line = w.chat.iter().any(|l| l.kind == ChatKind::System && l.text.contains("Jane Doe"));
         let toast_shown = w.notifications.list.iter().any(|n| n.kind == Kind::Presence);
-        // LifeTech: the line in nearby chat replaces the toast
-        assert_eq!(
-            (toast_shown, line),
-            (toast && !in_chat, in_chat),
-            "toast {toast}, in chat {in_chat}"
-        );
+        // each by its own switch: both, either or none
+        assert_eq!((toast_shown, line), (toast, in_chat), "toast {toast}, in chat {in_chat}");
         // and it is not unread chat: no count beside Nearby chat
         assert_eq!(w.chat_badge, 0, "toast {toast}, in chat {in_chat}");
         assert_eq!(w.nearby_read(), 0, "toast {toast}, in chat {in_chat}");

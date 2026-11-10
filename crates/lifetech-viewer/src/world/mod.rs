@@ -5260,14 +5260,8 @@ impl World {
             }
             // the toast of LLNotificationTipHandler (ChatOnlineNotification),
             // never during login, in do not disturb nor for a blocked
-            // resident; LifeTech: nor when the notice goes to nearby chat
-            // (OnlineOfflinetoNearbyChat), which already says it
-            if self.notifications.toasts.presence
-                && !self.notifications.toasts.presence_in_chat
-                && self.notifications.started
-                && !self.status.dnd
-                && !self.mutes.is_muted_id(&id)
-            {
+            // resident; its own preference, apart from the nearby chat line
+            if self.notifications.toasts.presence && self.notifications.started && !self.status.dnd && !self.mutes.is_muted_id(&id) {
                 let notification = self.notifications.push_presence(id, n.clone(), online);
                 self.notifications
                     .link_name(notification, self.social.name_of(&id), notifications::NameTarget::Avatar(id));
