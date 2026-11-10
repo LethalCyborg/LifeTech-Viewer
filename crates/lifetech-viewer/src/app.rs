@@ -7770,7 +7770,9 @@ impl App {
         } else {
             &self.down
         };
-        let k = |a: Action| kb.held(a, down, m);
+        // Alt + a movement key drives the camera, not the avatar
+        // (KeyBindings::alt_camera_claims)
+        let k = |a: Action| kb.held(a, down, m) && !kb.alt_camera_claims(a, down, m);
         let mut i = MoveInput::default();
         if !typing || chat_moves {
             i.forward = k(Action::Forward);
@@ -7794,10 +7796,9 @@ impl App {
                     .down
                     .iter()
                     .any(|input| self.settings.keybinds.pass_wall_triggered(input, self.mods()));
-            // Alt+E / Alt+C orbit the camera instead (KeyBindings::alt_orbit_held)
-            i.up = k(Action::Up) && !passing && !kb.alt_orbit_held(true, down, m);
+            i.up = k(Action::Up) && !passing;
             // Page Down / C: crouch on the ground (crouch-walk while moving), descend in flight
-            i.down = k(Action::Down) && !kb.alt_orbit_held(false, down, m);
+            i.down = k(Action::Down);
         }
         // the Controls window's buttons, held like their keys
         let held = |a: Action| self.controls_held.contains(&a);
@@ -7930,10 +7931,7 @@ impl App {
         let mut rate = [0.0f32; 10];
         for (n, a) in CAMERA_KEYS.into_iter().enumerate() {
             let kb = &self.settings.keybinds;
-            let key = !typing
-                && (kb.held(a, &self.down, m)
-                    || (a == A::CamOrbitOver && kb.alt_orbit_held(true, &self.down, m))
-                    || (a == A::CamOrbitUnder && kb.alt_orbit_held(false, &self.down, m)));
+            let key = !typing && (kb.held(a, &self.down, m) || kb.alt_camera_held(a, &self.down, m));
             if self.in_world() && (key || self.controls_held.contains(&a)) {
                 let held = self.cam_key_since[n].get_or_insert(now).elapsed().as_secs_f32();
                 rate[n] = if held < NUDGE_TIME { 0.05 + held * 0.95 / NUDGE_TIME } else { 1.0 };

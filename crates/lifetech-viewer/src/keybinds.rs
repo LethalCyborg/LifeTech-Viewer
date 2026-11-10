@@ -1390,17 +1390,51 @@ impl KeyBindings {
         })
     }
 
-    /// Alt + an unmodified jump (`over`) or crouch key orbits the camera over
-    /// or under its focus instead of moving the avatar: key_bindings.xml,
-    /// third_person `ALT E spin_over` / `ALT C spin_under` (and `CTL_ALT`
-    /// while sitting). Derived from the current Up / Down bindings, like
+    /// Alt + a movement key drives the camera instead of the avatar, as in
+    /// the Legacy Viewer's third_person keys (key_bindings.xml):
+    /// - Alt: A / D `spin_around_cw` / `ccw`, W / S `move_forward` /
+    ///   `move_backward` (camera in / out), E / C `spin_over` / `spin_under`;
+    /// - Ctrl+Alt: W / E `spin_over`, S / C `spin_under`;
+    /// - Ctrl+Alt+Shift: W / A / S / D `pan_up` / `left` / `down` / `right`.
+    ///
+    /// Derived from the current movement bindings, like
     /// `pass_wall_bindings`, so a rebinding or another layout follows; an
-    /// explicit Alt binding of the same key (Alt+Page Up) keeps its own.
-    pub fn alt_orbit_held(&self, over: bool, down: &HashSet<Input>, m: Mods) -> bool {
-        if !m.alt || m.shift {
-            return false;
+    /// explicit Alt binding of the same key (Alt+arrows, Alt+Page Up) keeps
+    /// its own meaning.
+    fn alt_camera_map(m: Mods) -> &'static [(Action, Action)] {
+        use Action as A;
+        if !m.alt {
+            return &[];
         }
-        let from = if over { Action::Up } else { Action::Down };
+        match (m.ctrl, m.shift) {
+            (false, false) => &[
+                (A::Up, A::CamOrbitOver),
+                (A::Down, A::CamOrbitUnder),
+                (A::Forward, A::CamZoomIn),
+                (A::Back, A::CamZoomOut),
+                (A::Left, A::CamOrbitCw),
+                (A::Right, A::CamOrbitCcw),
+            ],
+            (true, false) => &[
+                (A::Up, A::CamOrbitOver),
+                (A::Down, A::CamOrbitUnder),
+                (A::Forward, A::CamOrbitOver),
+                (A::Back, A::CamOrbitUnder),
+            ],
+            (true, true) => &[
+                (A::Forward, A::CamPanUp),
+                (A::Back, A::CamPanDown),
+                (A::Left, A::CamPanLeft),
+                (A::Right, A::CamPanRight),
+            ],
+            (false, true) => &[],
+        }
+    }
+
+    /// A plain binding of movement action `from` is held, no shortcut fires
+    /// on it with exactly these modifiers (`triggered`), and no held
+    /// binding (the camera's Alt+arrows) with these modifiers claims it.
+    fn derived_camera_key(&self, from: Action, down: &HashSet<Input>, m: Mods) -> bool {
         self.get(from).iter().flatten().any(|b| {
             !b.ctrl
                 && !b.alt
@@ -1409,12 +1443,28 @@ impl KeyBindings {
                 && self.triggered(&b.input, m).is_none()
                 && !self.map.iter().any(|(x, bs)| {
                     *x != from
+                        && is_held(*x)
                         && bs
                             .iter()
                             .flatten()
                             .any(|o| o.input == b.input && o.alt && (!o.ctrl || m.ctrl) && (!o.shift || m.shift))
                 })
         })
+    }
+
+    /// Camera action `cam` is held through Alt + a movement key.
+    pub fn alt_camera_held(&self, cam: Action, down: &HashSet<Input>, m: Mods) -> bool {
+        Self::alt_camera_map(m)
+            .iter()
+            .any(|&(from, to)| to == cam && self.derived_camera_key(from, down, m))
+    }
+
+    /// Movement action `mv` is taken by the camera (Alt held): the avatar
+    /// does not move on it.
+    pub fn alt_camera_claims(&self, mv: Action, down: &HashSet<Input>, m: Mods) -> bool {
+        Self::alt_camera_map(m)
+            .iter()
+            .any(|&(from, _)| from == mv && self.derived_camera_key(from, down, m))
     }
 
     /// Action triggered by a press: an exact modifier match wins, then a
@@ -1685,26 +1735,51 @@ mod tests {
     }
 
     #[test]
-    fn alt_jump_and_crouch_keys_orbit_the_camera_over_and_under() {
+    fn alt_movement_keys_drive_the_camera_like_the_legacy_viewer() {
         let kb = KeyBindings::us_places(layout::KeyboardLayout::wasd().movement_keys());
         let alt = Mods {
             alt: true,
             ..Default::default()
         };
         let ctrl_alt = Mods { ctrl: true, ..alt };
+        let all = Mods { shift: true, ..ctrl_alt };
         let alt_shift = Mods { shift: true, ..alt };
-        for (code, over) in [(KeyCode::KeyE, true), (KeyCode::KeyC, false)] {
+        use Action as A;
+        for (code, mods, cam, mv) in [
+            (KeyCode::KeyE, alt, A::CamOrbitOver, A::Up),
+            (KeyCode::KeyC, alt, A::CamOrbitUnder, A::Down),
+            (KeyCode::KeyW, alt, A::CamZoomIn, A::Forward),
+            (KeyCode::KeyS, alt, A::CamZoomOut, A::Back),
+            (KeyCode::KeyA, alt, A::CamOrbitCw, A::Left),
+            (KeyCode::KeyD, alt, A::CamOrbitCcw, A::Right),
+            (KeyCode::KeyE, ctrl_alt, A::CamOrbitOver, A::Up),
+            (KeyCode::KeyC, ctrl_alt, A::CamOrbitUnder, A::Down),
+            (KeyCode::KeyW, ctrl_alt, A::CamOrbitOver, A::Forward),
+            (KeyCode::KeyS, ctrl_alt, A::CamOrbitUnder, A::Back),
+            (KeyCode::KeyW, all, A::CamPanUp, A::Forward),
+            (KeyCode::KeyA, all, A::CamPanLeft, A::Left),
+            (KeyCode::KeyD, all, A::CamPanRight, A::Right),
+        ] {
             let down = HashSet::from([Input::key(code)]);
-            assert!(kb.alt_orbit_held(over, &down, alt), "{code:?}");
-            assert!(kb.alt_orbit_held(over, &down, ctrl_alt), "CTL_ALT while sitting");
-            assert!(!kb.alt_orbit_held(!over, &down, alt));
-            assert!(!kb.alt_orbit_held(over, &down, Mods::default()), "plain E / C still jump / crouch");
-            assert!(!kb.alt_orbit_held(over, &down, alt_shift));
+            assert!(kb.alt_camera_held(cam, &down, mods), "{code:?} {mods:?}");
+            assert!(kb.alt_camera_claims(mv, &down, mods), "{code:?} {mods:?}");
+            // without Alt the key moves the avatar again
+            assert!(!kb.alt_camera_held(cam, &down, Mods::default()));
+            assert!(!kb.alt_camera_claims(mv, &down, Mods::default()));
         }
-        // Alt+Page Up keeps its explicit CamOrbitOver binding, not a derived one
-        let page_up = HashSet::from([Input::key(KeyCode::PageUp)]);
-        assert!(!kb.alt_orbit_held(true, &page_up, alt));
-        assert!(kb.held(Action::CamOrbitOver, &page_up, alt));
+        // menu shortcuts win, as in the Legacy Viewer: Alt+Shift+S stays
+        // Sit Down / Stand Up, Ctrl+Alt+Shift+S Debug Settings
+        let s = HashSet::from([Input::key(KeyCode::KeyS)]);
+        assert!(!kb.alt_camera_claims(A::Back, &s, alt_shift));
+        assert!(!kb.alt_camera_claims(A::Back, &s, all));
+        // Alt+arrows and Alt+Page Up keep their explicit camera bindings
+        for code in [KeyCode::ArrowUp, KeyCode::ArrowLeft, KeyCode::PageUp] {
+            let down = HashSet::from([Input::key(code)]);
+            for mv in [A::Forward, A::Left, A::Up] {
+                assert!(!kb.alt_camera_claims(mv, &down, alt));
+            }
+        }
+        assert!(kb.held(A::CamOrbitOver, &HashSet::from([Input::key(KeyCode::PageUp)]), alt));
     }
 
     #[test]
