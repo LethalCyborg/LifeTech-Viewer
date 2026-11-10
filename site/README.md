@@ -4,6 +4,11 @@ LifeTech Viewer's website: a PHP site (PHP 8.5) served by CloudPanel.
 
 - `index.php`: the public page (features, download, links).
 - `me/`: the private download area, behind a password.
+- `sync/api.php`: LifeTech Sync's server (the personal build's sync): a
+  store of blobs the viewer encrypts, per account, behind a token derived
+  from the owner's passphrase. Data in `ltv-private/sync/`; new accounts
+  only while `'sync' => ['registration_open' => true, 'max_accounts' => 1]`
+  is in `config.php`.
 - `assets/`: styles, logos and demo screenshots.
 
 Nothing secret is in this folder. On the server, next to the site's folder
