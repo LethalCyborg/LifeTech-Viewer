@@ -326,7 +326,9 @@ switch ($op) {
     case 'fetch':
         lts_authorised($account);
         $build = lts_build((string) ($_GET['platform'] ?? ''));
-        if ($build === null || $build[0] !== (string) ($_GET['file'] ?? '')) {
+        // (a "+" of the version sent unencoded arrives as a space)
+        $file = str_replace(' ', '+', (string) ($_GET['file'] ?? ''));
+        if ($build === null || $build[0] !== $file) {
             lts_fail(404, 'no such build');
         }
         @set_time_limit(0);
