@@ -1,13 +1,51 @@
 <?php
 declare(strict_types=1);
-// viewer.lifetech.systems: LifeTech Viewer's page. Static content; PHP only
-// for the year and the cache headers.
+// viewer.lifetech.systems: LifeTech Viewer's page. Static content; PHP for
+// the year, the cache headers and the list of downloads (downloads/).
 header('Content-Type: text/html; charset=utf-8');
 header('Cache-Control: public, max-age=300');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: strict-origin-when-cross-origin');
 $year = date('Y');
 $source = 'https://github.com/LethalCyborg/LifeTech-Viewer';
+
+/// The newest public build of each platform in downloads/:
+/// LifeTech-Viewer-<version>-<platform>.<ext>, with its .sha256 beside it.
+function ltv_builds(): array
+{
+    $platforms = [
+        'windows-x64' => ['zip', 'Windows', '64-bit, Windows 10 and 11'],
+        'macos-arm64' => ['dmg', 'macOS', 'Apple Silicon (M1 or later)'],
+        'linux-x64' => ['tar.gz', 'Linux', '64-bit, recent distributions'],
+    ];
+    $out = [];
+    foreach ($platforms as $platform => [$ext, $system, $detail]) {
+        $best = null;
+        foreach (glob(__DIR__ . "/downloads/LifeTech-Viewer-*-$platform.$ext") ?: [] as $path) {
+            if (!is_file("$path.sha256")) {
+                continue;
+            }
+            if ($best === null || filemtime($path) > filemtime($best)) {
+                $best = $path;
+            }
+        }
+        if ($best === null) {
+            continue;
+        }
+        $name = basename($best);
+        $version = substr($name, strlen('LifeTech-Viewer-'), -strlen("-$platform.$ext"));
+        $out[] = [
+            'system' => $system,
+            'detail' => $detail,
+            'name' => $name,
+            'version' => $version,
+            'size' => sprintf('%.0f MB', filesize($best) / (1 << 20)),
+            'sha256' => strtok((string) file_get_contents("$best.sha256"), " \t\n") ?: '',
+        ];
+    }
+    return $out;
+}
+$builds = ltv_builds();
 ?><!doctype html>
 <html lang="en">
 <head>
@@ -131,11 +169,31 @@ $source = 'https://github.com/LethalCyborg/LifeTech-Viewer';
         <span class="eyebrow">Download</span>
         <h2 style="margin-top:12px">Get LifeTech Viewer</h2>
       </div>
+<?php if ($builds): ?>
+      <div class="files">
+<?php foreach ($builds as $b): ?>
+        <div class="file">
+          <div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></div>
+          <div>
+            <div class="name">LifeTech Viewer <?= htmlspecialchars($b['version']) ?> for <?= htmlspecialchars($b['system']) ?></div>
+            <div class="meta"><?= htmlspecialchars($b['detail']) ?> · <?= htmlspecialchars($b['size']) ?><br>SHA-256 <code><?= htmlspecialchars($b['sha256']) ?></code></div>
+          </div>
+          <a class="btn btn-glow btn-sm" href="/downloads/<?= rawurlencode($b['name']) ?>" download>Download</a>
+        </div>
+<?php endforeach; ?>
+      </div>
+      <p class="note">macOS: the first time, right-click LifeTech Viewer in Applications and choose <b>Open</b> (or System Settings › Privacy &amp; Security › <b>Open Anyway</b>). Linux: unpack the archive and start <code>lifetech-viewer</code>. Windows: unzip it and start <code>lifetech-viewer.exe</code>; if SmartScreen asks, choose <b>More info</b> › <b>Run anyway</b>.</p>
+<?php endif; ?>
       <div class="download">
         <div class="card">
+<?php if (!$builds): ?>
           <span class="pill">Coming soon</span>
           <h3>Public downloads</h3>
           <p>Ready-to-install versions for Windows, macOS and Linux are on their way. Until then, LifeTech Viewer can be built from its source code on GitHub.</p>
+<?php else: ?>
+          <h3>Source code</h3>
+          <p>LifeTech Viewer is free software under the GNU GPL v3: its source code, and every version's, is on GitHub.</p>
+<?php endif; ?>
           <div class="cta">
             <a class="btn btn-glow" href="<?= $source ?>" rel="noopener">View the source</a>
             <a class="btn btn-ghost" href="<?= $source ?>/issues/new/choose" rel="noopener">Report a bug</a>
