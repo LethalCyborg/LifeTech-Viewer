@@ -60,10 +60,9 @@ fn main() {
             for x in 0..w {
                 let s = (src_row * tw + x) * 4;
                 let d = (y * w + x) * 4;
-                rgba[d] = f.data[s + 2];
-                rgba[d + 1] = f.data[s + 1];
-                rgba[d + 2] = f.data[s];
-                rgba[d + 3] = 255;
+                let px = [f.data[s], f.data[s + 1], f.data[s + 2], f.data[s + 3]];
+                let [r, g, b] = f.rgb(&px);
+                rgba[d..d + 4].copy_from_slice(&[r, g, b, 255]);
             }
         }
         image::save_buffer(&out, &rgba, w as u32, h as u32, image::ColorType::Rgba8).expect("png");

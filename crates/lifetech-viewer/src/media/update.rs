@@ -933,10 +933,8 @@ impl MediaManager {
                     };
                     let dst = &mut self.scratch[(k * w * 4) as usize..((k + 1) * w * 4) as usize];
                     for (d, s) in dst.as_chunks_mut::<4>().0.iter_mut().zip(src.as_chunks::<4>().0) {
-                        d[0] = s[2];
-                        d[1] = s[1];
-                        d[2] = s[0];
-                        d[3] = 255;
+                        let [r, g, b] = frame.rgb(s);
+                        *d = [r, g, b, 255];
                     }
                 }
                 if ok {

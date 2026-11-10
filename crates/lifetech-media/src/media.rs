@@ -152,7 +152,8 @@ impl Rect {
     }
 }
 
-/// Pixels of the current frame (BGRA, 4 bytes per pixel).
+/// Pixels of the current frame, 4 bytes per pixel, in the order the plugin
+/// declared in its texture_params (`bgra`).
 pub struct Frame<'a> {
     pub media_width: u32,
     pub media_height: u32,
@@ -161,7 +162,19 @@ pub struct Frame<'a> {
     pub texture_height: u32,
     /// Rows run bottom-up (OpenGL coordinates).
     pub bottom_up: bool,
+    /// BGRA (GL_BGRA: the web plugin); otherwise RGBA (GL_RGBA: the
+    /// GStreamer video plugin writes R, G, B, then an unused byte).
+    pub bgra: bool,
     pub data: &'a [u8],
+}
+
+impl Frame<'_> {
+    /// One pixel's red, green and blue
+    /// (LLViewerMediaImpl::updateMediaImage uploads with the plugin's
+    /// format, indra/newview/llviewermedia.cpp).
+    pub fn rgb(&self, px: &[u8; 4]) -> [u8; 3] {
+        if self.bgra { [px[2], px[1], px[0]] } else { [px[0], px[1], px[2]] }
+    }
 }
 
 pub fn next_power_of_2(v: i32) -> i32 {
@@ -630,6 +643,7 @@ impl MediaPlugin {
             texture_width: self.texture_width as u32,
             texture_height: self.texture_height as u32,
             bottom_up: self.coords_opengl,
+            bgra: self.is_bgra(),
             data: shm.bytes(),
         })
     }
@@ -1085,6 +1099,23 @@ fn volume_changed(previous: f32, next: f32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_pixels_follow_the_plugins_format() {
+        // the web plugin's BGRA and the GStreamer plugin's RGBA (R, G, B,
+        // unused) give the same red
+        let frame = |bgra| Frame {
+            media_width: 1,
+            media_height: 1,
+            texture_width: 1,
+            texture_height: 1,
+            bottom_up: false,
+            bgra,
+            data: &[],
+        };
+        assert_eq!(frame(true).rgb(&[0, 0, 255, 255]), [255, 0, 0]);
+        assert_eq!(frame(false).rgb(&[255, 0, 0, 0]), [255, 0, 0]);
+    }
 
     #[test]
     fn minimized_mute_reaches_plugins_even_at_a_tiny_volume() {

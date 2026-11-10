@@ -384,8 +384,10 @@ impl WebView {
                     ok = false;
                     break;
                 };
-                self.scratch
-                    .extend(src.as_chunks::<4>().0.iter().map(|s| Color32::from_rgb(s[2], s[1], s[0])));
+                self.scratch.extend(src.as_chunks::<4>().0.iter().map(|s| {
+                    let [r, g, b] = frame.rgb(s);
+                    Color32::from_rgb(r, g, b)
+                }));
             }
             if ok && mw > 0 && mh > 0 {
                 let img = egui::ColorImage::new([mw, mh], std::mem::take(&mut self.scratch));
