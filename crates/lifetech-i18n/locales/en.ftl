@@ -11413,7 +11413,7 @@ physics-creating = Creating a physics layer…
 physics-demo-name = LifeTech Physics
 
 # Compact texture and material library
-texture-library-title = Library
+texture-library-title = Build Chest
 resource-preview-fit = Fit window
 resource-preview-custom-ratio = Custom ratio
 resource-preview-uploader = Uploaded by { $name }
@@ -11438,11 +11438,11 @@ resource-preview-map-rights = A replacement texture requires copy and transfer p
 resource-preview-upload-map = Upload a local texture. Review its fee in Import; this map is replaced after the upload completes.
 texture-library-side = Show on the side
 texture-library-bottom = Show at the bottom
-texture-library-empty = Place resources in #LifeTech/LifeTech Library or any of its subfolders.
-texture-library-preparing = Preparing the library folders…
+texture-library-empty = Place resources in #LifeTech/Build Chest or any of its subfolders.
+texture-library-preparing = Preparing the Build Chest folders…
 texture-library-loading = Loading folders…
 texture-library-retry = Try again
-texture-library-all = Entire library
+texture-library-all = Entire chest
 texture-library-textures = Textures
 texture-library-pbr = PBR
 texture-library-objects = Objects
@@ -11477,7 +11477,7 @@ texture-library-demo-linen = Natural linen
 texture-library-demo-sources = Demo materials
 texture-library-folder-error = Some folders could not be loaded.
 texture-library-manage = Organize in inventory
-texture-library-content-hint = Folder names are conventions: every supported type can be stored anywhere in LifeTech Library.
+texture-library-content-hint = Folder names are conventions: every supported type can be stored anywhere in the Build Chest.
 texture-library-demo-polished = Polished
 
 texture-library-click-hint = Click to apply to the faces selected in Edit mode.
@@ -11786,8 +11786,8 @@ build-linked-next = Next linked prim
 build-linked-previous = Previous linked prim
 picker-inventory-tab = Inventory
 picker-local-tab = Local
-picker-aurora-tab = LifeTech Library
-picker-empty-library = Your LifeTech Library is empty.
+picker-aurora-tab = Build Chest
+picker-empty-library = Your Build Chest is empty.
 
 build-link-pending = Link request sent — waiting for the simulator.
 build-link-unconfirmed = Linking was not confirmed by the simulator.

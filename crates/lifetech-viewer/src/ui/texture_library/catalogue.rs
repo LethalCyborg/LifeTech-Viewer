@@ -7,7 +7,7 @@ use std::collections::{HashSet, VecDeque};
 use uuid::Uuid;
 
 pub const AURORA: &str = "#LifeTech";
-pub const LIBRARY: &str = "LifeTech Library";
+pub const LIBRARY: &str = crate::world::brand_folder::CHEST;
 pub const LEGACY_TEXTURES: &str = "Textures Library";
 pub const OBJECTS_LIBRARY: &str = "Objects Library";
 pub const DEFAULT_FOLDERS: [&str; 8] = [
@@ -424,7 +424,7 @@ mod tests {
         );
         assert!(catalogue.entries[0].matches("marble", Some(source)));
         assert!(catalogue.entries[0].matches("nested", Some(nested)));
-        assert_eq!(catalogue.entries[0].path, "LifeTech Library / Stone / Nested");
+        assert_eq!(catalogue.entries[0].path, "Build Chest / Stone / Nested");
     }
     #[test]
     fn library_objects_use_thumbnails_and_distinct_single_and_group_fallbacks() {

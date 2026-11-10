@@ -11409,7 +11409,7 @@ physics-creating = Création des propriétés physiques…
 physics-demo-name = Physique LifeTech
 
 # Compact texture and material library
-texture-library-title = Bibliothèque
+texture-library-title = Coffre de construction
 resource-preview-fit = Adapter à la fenêtre
 resource-preview-custom-ratio = Ratio personnalisé
 resource-preview-uploader = Importée par { $name }
@@ -11434,11 +11434,11 @@ resource-preview-map-rights = Une texture de remplacement nécessite les permiss
 resource-preview-upload-map = Importer une texture locale. Vérifiez le tarif dans Importer ; cette texture sera remplacée une fois l’importation terminée.
 texture-library-side = Afficher sur le côté
 texture-library-bottom = Afficher en bas
-texture-library-empty = Placez vos ressources dans #LifeTech/LifeTech Library ou ses sous-dossiers.
-texture-library-preparing = Préparation des dossiers de la bibliothèque…
+texture-library-empty = Placez vos ressources dans #LifeTech/Build Chest ou ses sous-dossiers.
+texture-library-preparing = Préparation des dossiers du coffre de construction…
 texture-library-loading = Chargement des dossiers…
 texture-library-retry = Réessayer
-texture-library-all = Toute la bibliothèque
+texture-library-all = Tout le coffre
 texture-library-textures = Textures
 texture-library-pbr = PBR
 texture-library-objects = Objets
@@ -11473,7 +11473,7 @@ texture-library-demo-linen = Lin naturel
 texture-library-demo-sources = Matériaux de démonstration
 texture-library-folder-error = Certains dossiers n’ont pas pu être chargés.
 texture-library-manage = Organiser dans l’inventaire
-texture-library-content-hint = Les noms de dossiers sont une convention : chaque type peut être rangé partout dans LifeTech Library.
+texture-library-content-hint = Les noms de dossiers sont une convention : chaque type peut être rangé partout dans le coffre de construction.
 texture-library-demo-polished = Poli
 
 texture-library-click-hint = Cliquez pour appliquer aux faces sélectionnées en mode édition.
@@ -11782,8 +11782,8 @@ build-linked-next = Prim liée suivante
 build-linked-previous = Prim liée précédente
 picker-inventory-tab = Inventaire
 picker-local-tab = Locale
-picker-aurora-tab = Librairie LifeTech
-picker-empty-library = Votre librairie LifeTech est vide.
+picker-aurora-tab = Coffre de construction
+picker-empty-library = Votre coffre de construction est vide.
 
 build-link-pending = Liaison demandée — en attente du simulateur.
 build-link-unconfirmed = La liaison n’a pas été confirmée par le simulateur.

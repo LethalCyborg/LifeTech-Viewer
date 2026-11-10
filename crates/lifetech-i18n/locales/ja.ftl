@@ -11391,7 +11391,7 @@ physics-creating = 物理効果のレイヤーを作成しています…
 physics-demo-name = LifeTech物理効果
 
 # Compact texture and material library
-texture-library-title = ライブラリ
+texture-library-title = ビルドチェスト
 resource-preview-fit = ウィンドウに合わせる
 resource-preview-custom-ratio = カスタムの比率
 resource-preview-uploader = { $name }がアップロード
@@ -11416,11 +11416,11 @@ resource-preview-map-rights = 置き換えるテクスチャにはコピーと�
 resource-preview-upload-map = ローカルのテクスチャをアップロードします。費用はインポートで確認してください。このマップはアップロードの完了後に置き換えられます。
 texture-library-side = 横に表示
 texture-library-bottom = 下に表示
-texture-library-empty = #LifeTech/LifeTech Libraryまたはそのサブフォルダにリソースを置いてください。
-texture-library-preparing = ライブラリのフォルダを準備しています…
+texture-library-empty = #LifeTech/Build Chestまたはそのサブフォルダにリソースを置いてください。
+texture-library-preparing = ビルドチェストのフォルダを準備しています…
 texture-library-loading = フォルダを読み込んでいます…
 texture-library-retry = 再試行
-texture-library-all = ライブラリ全体
+texture-library-all = チェスト全体
 texture-library-textures = テクスチャ
 texture-library-pbr = ＰＢＲ
 texture-library-objects = オブジェクト
@@ -11455,7 +11455,7 @@ texture-library-demo-linen = 天然リネン
 texture-library-demo-sources = デモ用マテリアル
 texture-library-folder-error = 一部のフォルダを読み込めませんでした。
 texture-library-manage = インベントリで整理
-texture-library-content-hint = フォルダ名は慣例です：サポートされているすべての種類は、LifeTech Libraryのどこにでも保存できます。
+texture-library-content-hint = フォルダ名は慣例です：サポートされているすべての種類は、ビルドチェストのどこにでも保存できます。
 texture-library-demo-polished = 研磨
 
 texture-library-click-hint = クリックすると、編集モードで選択した面に適用します。
@@ -11764,8 +11764,8 @@ build-linked-next = 次のリンクされたプリム
 build-linked-previous = 前のリンクされたプリム
 picker-inventory-tab = インベントリ
 picker-local-tab = ローカル
-picker-aurora-tab = LifeTechライブラリ
-picker-empty-library = LifeTechライブラリは空です。
+picker-aurora-tab = ビルドチェスト
+picker-empty-library = ビルドチェストは空です。
 
 build-link-pending = リンクを要求しました‐シミュレーターを待っています。
 build-link-unconfirmed = シミュレーターがリンクを確認しませんでした。

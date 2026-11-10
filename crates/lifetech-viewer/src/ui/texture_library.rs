@@ -1,5 +1,5 @@
-//! Compact inventory library: lateral grid and bottom shelf backed by the
-//! actual subtree under #LifeTech/LifeTech Library.
+//! The Build Chest (LifeTech's name; Aurora's texture library): lateral grid
+//! and bottom shelf backed by the actual subtree under #LifeTech/Build Chest.
 
 pub(crate) mod catalogue;
 mod material_editor;

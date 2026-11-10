@@ -1,9 +1,10 @@
 //! LifeTech: the viewer's own folder at the top of the inventory is
 //! "#LifeTech", with "LifeTech AO" (the animation overrider's sets) and
-//! "LifeTech Library" (the texture library) in it. Aurora Viewer, which
-//! LifeTech Viewer is based on, named them "#Aurora", "Aurora AO" and
-//! "Aurora Library": an avatar that used it keeps its sets and its library,
-//! its folders renamed once, at the first login with LifeTech Viewer.
+//! "Build Chest" (the Build Chest's resources, ui/texture_library.rs) in it.
+//! Aurora Viewer, which LifeTech Viewer is based on, named them "#Aurora",
+//! "Aurora AO" and "Aurora Library", and LifeTech Viewer 1.0 named the chest
+//! "LifeTech Library": an avatar that used either keeps its sets and its
+//! chest, the folders renamed once, at login.
 
 use super::inventory::{Inventory, actions};
 use lifetech_llsd::llsd_map;
@@ -12,9 +13,12 @@ use uuid::Uuid;
 
 /// The viewer's folder at the top of the inventory.
 pub const BRAND: &str = "#LifeTech";
-/// Aurora Viewer's names, and LifeTech's for the same folders.
+/// The Build Chest's folder in it (`ui::texture_library::catalogue::LIBRARY`).
+pub const CHEST: &str = "Build Chest";
+/// Aurora Viewer's name of the top folder.
 const LEGACY_BRAND: &str = "#Aurora";
-const LEGACY_CHILDREN: [(&str, &str); 2] = [("Aurora AO", "LifeTech AO"), ("Aurora Library", "LifeTech Library")];
+/// Earlier names of the folders in it, and LifeTech's.
+const LEGACY_CHILDREN: [(&str, &str); 3] = [("Aurora AO", "LifeTech AO"), ("Aurora Library", CHEST), ("LifeTech Library", CHEST)];
 
 /// The child folder of `parent` named `name`, if any (not in the Library).
 fn child(inv: &Inventory, parent: Uuid, name: &str) -> Option<Uuid> {
@@ -26,27 +30,42 @@ fn child(inv: &Inventory, parent: Uuid, name: &str) -> Option<Uuid> {
         .find(|id| inv.folders.get(id).is_some_and(|f| !f.library && f.info.name == name))
 }
 
-/// The renames that bring an Aurora Viewer folder to LifeTech's names:
-/// "#Aurora" and its "Aurora AO" and "Aurora Library". Nothing when there is
-/// no "#Aurora", or when a "#LifeTech" already exists (two folders are never
-/// merged behind the resident's back).
-pub fn migration(inv: &Inventory) -> Vec<Mutation> {
+/// The folders to rename and their new names: "#Aurora" when there is no
+/// "#LifeTech" yet (two folders are never merged behind the resident's
+/// back), then in the brand folder "Aurora AO" and the chest's earlier
+/// names, each only while its new name is free.
+fn renames(inv: &Inventory) -> Vec<(Uuid, &'static str)> {
     let root = inv.root;
-    if root.is_nil() || child(inv, root, BRAND).is_some() {
+    if root.is_nil() {
         return Vec::new();
     }
-    let Some(legacy) = child(inv, root, LEGACY_BRAND) else {
-        return Vec::new();
+    let mut out = Vec::new();
+    let brand = match child(inv, root, BRAND) {
+        Some(brand) => brand,
+        None => match child(inv, root, LEGACY_BRAND) {
+            Some(legacy) => {
+                out.push((legacy, BRAND));
+                legacy
+            }
+            None => return out,
+        },
     };
-    let mut renames = vec![(legacy, BRAND)];
+    let mut taken: Vec<&str> = Vec::new();
     for (old, new) in LEGACY_CHILDREN {
-        if child(inv, legacy, new).is_none()
-            && let Some(id) = child(inv, legacy, old)
+        if child(inv, brand, new).is_none()
+            && !taken.contains(&new)
+            && let Some(id) = child(inv, brand, old)
         {
-            renames.push((id, new));
+            out.push((id, new));
+            taken.push(new);
         }
     }
-    renames
+    out
+}
+
+/// The renames that bring the folders to LifeTech's names (`renames`).
+pub fn migration(inv: &Inventory) -> Vec<Mutation> {
+    renames(inv)
         .into_iter()
         .filter_map(|(id, name)| match actions::patch(inv, id, llsd_map! { "name" => name }) {
             Ok(change) => Some(change),
@@ -107,7 +126,39 @@ mod tests {
         add(&mut inv, 3, id(2), "Aurora AO");
         add(&mut inv, 4, id(2), "Aurora Library");
         add(&mut inv, 5, id(2), "Received items");
-        assert_eq!(migration(&inv).len(), 3, "#Aurora, its AO and its library; the rest stays");
+        assert_eq!(
+            renames(&inv),
+            [(id(2), "#LifeTech"), (id(3), "LifeTech AO"), (id(4), "Build Chest")],
+            "#Aurora, its AO and its library; the rest stays"
+        );
+        assert_eq!(migration(&inv).len(), 3);
+    }
+
+    #[test]
+    fn the_lifetech_library_of_1_0_becomes_the_build_chest() {
+        let mut inv = inventory();
+        add(&mut inv, 2, id(1), "#LifeTech");
+        add(&mut inv, 3, id(2), "LifeTech AO");
+        add(&mut inv, 4, id(2), "LifeTech Library");
+        assert_eq!(renames(&inv), [(id(4), "Build Chest")]);
+        // once renamed, nothing more
+        inv.folders.get_mut(&id(4)).unwrap().info.name = "Build Chest".into();
+        assert!(renames(&inv).is_empty());
+    }
+
+    #[test]
+    fn an_existing_chest_is_never_renamed_over() {
+        let mut inv = inventory();
+        add(&mut inv, 2, id(1), "#LifeTech");
+        add(&mut inv, 3, id(2), "Build Chest");
+        add(&mut inv, 4, id(2), "LifeTech Library");
+        assert!(renames(&inv).is_empty());
+        // two earlier chests: only the first takes the name
+        let mut inv = inventory();
+        add(&mut inv, 2, id(1), "#LifeTech");
+        add(&mut inv, 3, id(2), "Aurora Library");
+        add(&mut inv, 4, id(2), "LifeTech Library");
+        assert_eq!(renames(&inv), [(id(3), "Build Chest")]);
     }
 
     #[test]
