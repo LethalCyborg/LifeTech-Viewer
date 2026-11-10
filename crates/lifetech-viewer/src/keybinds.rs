@@ -433,6 +433,8 @@ pub enum Action {
     /// (Advanced.SetDoubleClickAction, Ctrl+Shift+D).
     DoubleClickTeleport,
     Beacons,
+    /// The contact sets' markers in the world (`Settings::contact_markers`).
+    ContactMarkers,
     PropertyLines,
     LandOwners,
     HideParticles,
@@ -593,6 +595,7 @@ pub fn sections() -> &'static Vec<(&'static str, Vec<(Action, &'static str)>)> {
                     (Action::HoverTips, lifetech_i18n::tr!("ui-options-hover-tips")),
                     (Action::Import, lifetech_i18n::tr!("keybinds-import-files")),
                     (Action::MuteAll, lifetech_i18n::tr!("keybinds-mute-all-sound")),
+                    (Action::ContactMarkers, lifetech_i18n::tr!("ui-options-contact-markers")),
                     (Action::DoubleClickTeleport, lifetech_i18n::tr!("keybinds-double-click-teleport")),
                     (Action::Quit, lifetech_i18n::tr!("ui-bars-quit-lifetech-viewer")),
                 ],
@@ -852,6 +855,7 @@ impl KeyBindings {
             // menu_viewer.xml: Mute/unmute sound, DoubleClick Teleport, Show
             // Selection Outlines
             (Action::MuteAll, [kalt(K::KeyM, true, true), None]),
+            (Action::ContactMarkers, [None, None]),
             (Action::DoubleClickTeleport, [kmod(K::KeyD, true, true), None]),
             (Action::SelectionOutlines, [kalt(K::KeyH, true, false), None]),
             (
