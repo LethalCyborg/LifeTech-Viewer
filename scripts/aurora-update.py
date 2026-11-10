@@ -140,6 +140,10 @@ def status():
     newer = git("rev-list", "--count", f"{at}..{head}", check=False) or "?"
     print(f"aurora branch: Aurora {at[:8]}; Aurora's main: {head[:8]}, {newer} newer commits")
     print(git("log", "--format=  %h %cs %s", f"{at}..{head}", check=False))
+    if subprocess.run(["git", "merge-base", "--is-ancestor", BRANCH, "main"]).returncode != 0:
+        print(f"main has not merged it yet: on main, `git merge {BRANCH}` takes Aurora {at[:8]}")
+    else:
+        print("main has merged it")
 
 
 def import_(ref):
