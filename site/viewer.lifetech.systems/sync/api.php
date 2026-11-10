@@ -26,6 +26,9 @@ const LTS_MAX_BLOBS = 20000;
 const LTS_FAILS = 10;           // bad tokens per address in LTS_FAIL_WINDOW
 const LTS_FAIL_WINDOW = 15 * 60;
 
+// files and folders the site's group can manage too (deploys, cleanup)
+umask(0007);
+
 header('Cache-Control: private, no-store, max-age=0');
 header('X-Content-Type-Options: nosniff');
 header('X-Robots-Tag: noindex, nofollow');
