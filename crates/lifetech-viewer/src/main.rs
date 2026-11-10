@@ -37,6 +37,8 @@ mod disk_io;
 mod dof;
 mod external_url;
 mod fast_hash;
+/// LifeTech: the frame loop's waits in the log ("frame pacing").
+mod frame_diag;
 mod frame_par;
 mod frame_profile;
 mod gestures;

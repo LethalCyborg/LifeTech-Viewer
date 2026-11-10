@@ -889,6 +889,8 @@ pub struct App {
     crash_timeline: crash_state::Timeline,
     /// The window is hidden behind others (`WindowEvent::Occluded`).
     occluded: bool,
+    /// LifeTech: the frame loop's waits, logged every 30 s.
+    frame_diag: crate::frame_diag::FrameDiag,
     /// The graphics card stopped finishing frames (app/gpu_stall.rs).
     gpu_stall: gpu_stall::GpuStall,
     /// The 3D paused behind on a busy card (app/busy_pause.rs).
@@ -1792,6 +1794,7 @@ impl App {
             crash_recent: Default::default(),
             crash_timeline: Default::default(),
             occluded: false,
+            frame_diag: Default::default(),
             gpu_stall: Default::default(),
             busy_pause: Default::default(),
             instances: crate::instances::Instances::new(),
@@ -11486,10 +11489,27 @@ impl App {
             // pace, the next frame reads its input once the GPU has finished
             // the frame before this one, instead of waiting behind it with
             // stale input; then the frame limiter
+            let t0 = Instant::now();
             gfx.renderer.wait_for_gpu();
-            if let Some(target) = target {
-                wait_until(self.frame_start + target);
-            }
+            let t1 = Instant::now();
+            let late = target.map_or(Duration::ZERO, |target| wait_until(self.frame_start + target));
+            let vsync = gfx.renderer.vsync();
+            self.frame_diag.frame(
+                crate::frame_diag::Waits {
+                    focused: self.focused,
+                    cap,
+                    gpu: t1 - t0,
+                    limiter: t1.elapsed(),
+                    late,
+                },
+                || {
+                    format!(
+                        "vsync {}, screen {monitor_hz:.0} Hz, occluded {}",
+                        if vsync { "on" } else { "off" },
+                        self.occluded
+                    )
+                },
+            );
         }
         self.frame_profile.lap(Lap::Limiter);
         // the graph's frame time: from one end of the limiter to the next,
@@ -21204,11 +21224,12 @@ impl ApplicationHandler for App {
 }
 
 /// The frame limiter's and the frame pacing's wait: a sleep to a
-/// millisecond before `until` (the scheduler's grain), then a spin.
-fn wait_until(until: Instant) {
+/// millisecond before `until` (the scheduler's grain), then a spin. How
+/// late it ended (a sleep the system made longer).
+fn wait_until(until: Instant) -> Duration {
     let now = Instant::now();
     if until <= now {
-        return;
+        return Duration::ZERO;
     }
     let rest = until - now;
     if rest > Duration::from_millis(2) {
@@ -21217,6 +21238,7 @@ fn wait_until(until: Instant) {
     while Instant::now() < until {
         std::hint::spin_loop();
     }
+    Instant::now().saturating_duration_since(until)
 }
 
 /// Frames per second the frame limiter holds the loop to (0 = none): the

@@ -1,5 +1,5 @@
 //! What the system knows of the process (AURORA_PROFILE and the resource
-//! monitor, Windows and Linux):
+//! monitor, Windows, Linux and macOS):
 //! its memory, and the CPU time of each of its threads, gathered by group
 //! of threads (the decode pool, the frame workers, the network runtime…).
 //! Linux reads it from `/proc` ([`proc_text`] parses it, on every system for
@@ -11,6 +11,10 @@
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
+
+/// LifeTech: the Mach readings of macOS.
+#[cfg(target_os = "macos")]
+mod macos;
 use std::time::{Duration, Instant};
 
 /// Time covered by one `cpu summary` line.
@@ -39,7 +43,11 @@ pub fn current_thread_id() -> u32 {
         // SAFETY: no argument, no state changed.
         unsafe { libc::gettid() as u32 }
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    {
+        macos::current_thread_id()
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     0
 }
 
@@ -84,7 +92,11 @@ pub fn process_memory() -> Option<ProcessMemory> {
             page_faults: faults as u32,
         })
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    {
+        macos::process_memory()
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     None
 }
 
@@ -234,6 +246,9 @@ fn clock_ticks() -> f64 {
     if n > 0 { n as f64 } else { 100.0 }
 }
 
+#[cfg(target_os = "macos")]
+use macos::{read_threads, system_times};
+
 /// The group of a thread: its name without the number of its pool
 /// (`aurora-jobs-3` → `aurora-jobs`), `main` for the main thread, `unnamed`
 /// for threads without a name (the driver's, the system's).
@@ -328,7 +343,7 @@ const QUIET_PERCENT: f64 = 0.1;
 /// Starts the thread that writes `cpu summary` every 10 s; `main` is the
 /// main thread's id. Nothing where threads cannot be read.
 pub fn start(main: u32) {
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     {
         let spawned = std::thread::Builder::new().name("aurora-probe".into()).spawn(move || {
             let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
@@ -363,7 +378,7 @@ pub fn start(main: u32) {
             log::warn!("cpu probe not started: {e}");
         }
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     let _ = main;
 }
 
@@ -491,7 +506,7 @@ struct Sampler {
     #[cfg(windows)]
     cores: Option<CoreCounters>,
     /// Each core's (idle, total) ticks at the previous sample.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     cores: Vec<(u64, u64)>,
 }
 
@@ -517,8 +532,16 @@ impl Sampler {
         (Some(system), loads)
     }
 
+    #[cfg(target_os = "macos")]
+    fn system_and_cores(&mut self) -> (Option<(u64, u64)>, Vec<f32>) {
+        let cores = macos::core_times();
+        let loads = proc_text::core_loads(&self.cores, &cores);
+        self.cores = cores;
+        (macos::system_times(), loads)
+    }
+
     /// A snapshot from the second sample on.
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     fn sample(&mut self, main: u32, children: &[u32]) -> Option<CpuSnapshot> {
         let rate = lifetech_render::thread_cpu::cycles_per_ms();
         let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
@@ -592,7 +615,7 @@ impl Sampler {
         out
     }
 
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     fn sample(&mut self, _main: u32, _children: &[u32]) -> Option<CpuSnapshot> {
         None
     }
@@ -627,6 +650,23 @@ fn group_priority(threads: &[ThreadTime], group: &str, main: u32) -> Option<i32>
     let t = threads.iter().find(|t| group_of(&t.name, t.id, main) == group)?;
     let text = std::fs::read_to_string(format!("/proc/self/task/{}/stat", t.id)).ok()?;
     proc_text::parse_stat(&text).map(|s| s.nice)
+}
+
+/// macOS: no thread priorities, child processes or their times are read
+/// (the media plugins' load is not shown there).
+#[cfg(target_os = "macos")]
+fn group_priority(_threads: &[ThreadTime], _group: &str, _main: u32) -> Option<i32> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn process_trees(_roots: &[u32]) -> HashMap<u32, Vec<u32>> {
+    HashMap::new()
+}
+
+#[cfg(target_os = "macos")]
+fn child_times(_pid: u32) -> Option<(u64, u64)> {
+    None
 }
 
 /// Each of `roots` that still runs, with every process it started
@@ -829,7 +869,7 @@ impl Drop for CoreCounters {
 /// The text of Linux's `/proc` files, parsed. Pure, so that the tests run
 /// on every system; nothing here trusts the text: a line missing or
 /// malformed gives None, never a panic.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
 pub mod proc_text {
     /// The fields of `/proc/<pid>/stat` (or of a thread's,
     /// `/proc/<pid>/task/<tid>/stat`) the probes read.
@@ -1141,7 +1181,7 @@ mod tests {
     #[test]
     fn the_process_memory_is_known_on_windows_and_linux() {
         let m = process_memory();
-        if cfg!(any(windows, target_os = "linux")) {
+        if cfg!(any(windows, target_os = "linux", target_os = "macos")) {
             let m = m.expect("read");
             assert!(m.working_set > 0 && m.private > 0 && m.peak_working_set >= m.working_set);
         }
