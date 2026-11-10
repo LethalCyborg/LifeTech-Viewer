@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Aurora Viewer.app: scripts/package-macos.ps1 replaces @VERSION@ with the
+     viewer's MAJOR.MINOR.PATCH. The texts shown to the user are translated
+     in the .lproj folders next to this file. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>LifeTech Viewer</string>
+	<key>CFBundleName</key>
+	<string>LifeTech Viewer</string>
+	<key>CFBundleExecutable</key>
+	<string>lifetech-viewer</string>
+	<key>CFBundleIconFile</key>
+	<string>LifeTech</string>
+	<key>CFBundleIdentifier</key>
+	<string>systems.lifetech.LifeTechViewer</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@VERSION@</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.games</string>
+	<!-- macOS Game Mode: the games category makes macOS treat the viewer as a
+	     game (Sonoma 14 and later) and LSSupportsGameMode opts in explicitly
+	     on macOS 26; GCSupportsGameMode is the GameController key of the same
+	     support. Unknown keys are ignored by older systems. Game Mode turns on
+	     when the viewer is in native full screen, not merely maximized. -->
+	<key>LSSupportsGameMode</key>
+	<true/>
+	<key>GCSupportsGameMode</key>
+	<true/>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<!-- voice chat: without it macOS ends the app when the microphone opens -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Aurora Viewer uses the microphone for voice chat in Second Life.</string>
+</dict>
+</plist>

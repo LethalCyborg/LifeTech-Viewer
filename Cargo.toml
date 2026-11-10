@@ -1,0 +1,88 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/Aurora-Viewer/Aurora-Viewer"
+publish = false
+
+# The single local profile: check.ps1 (clippy, tests) and the demo runs share
+# it, so a worktree compiles everything once. It behaves like the shipped
+# build (no debug assertions or overflow checks, no console window) and only
+# skips the slow LTO of --release, kept for releases and performance work.
+# Debug info: line tables only (function names and line numbers in crash
+# stacks, without the gigabytes of full debug info in target/).
+[profile.dev]
+opt-level = 1
+debug = "line-tables-only"
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# CI (clippy, tests): compiled fast rather than running fast; keeps the
+# debug assertions and overflow checks as an extra net for the tests.
+[profile.ci]
+inherits = "dev"
+opt-level = 0
+debug = false
+debug-assertions = true
+overflow-checks = true
+incremental = false
+
+[profile.ci.package."*"]
+opt-level = 0
+
+# "Debug viewer" of aurora-tools.cmd (target\debugging): a console window,
+# debug assertions and overflow checks, full debug info for Aurora's own
+# crates (line tables only for the dependencies, to keep it to a few GB).
+[profile.debugging]
+inherits = "dev"
+debug = "full"
+debug-assertions = true
+overflow-checks = true
+
+[profile.debugging.package."*"]
+opt-level = 3
+debug = "line-tables-only"
+
+[profile.release]
+debug = "line-tables-only"
+lto = "thin"
+codegen-units = 16
+
+# Shared lints: every crate opts in with `[lints] workspace = true`.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[workspace.lints.clippy]
+# Render passes and GPU setup legitimately take many parameters and
+# nested tuple types; splitting them would not make the code clearer.
+too_many_arguments = "allow"
+type_complexity = "allow"
+
+# wgpu 30.0.1 with one upstream fix only, until a wgpu release has it
+# (31, or a 30.0.x that carries it): gfx-rs/wgpu#10124, a Vulkan descriptor pool with
+# `poolSizeCount = 0` that the Intel driver of 6th to 9th generation
+# integrated GPUs (`igvk64`) reads past and crashes on at every start
+# (#1302). The organisation's fork `Aurora-Viewer/wgpu` holds the branch
+# `aurora/v30.0.1-empty-pool`: the v30.0.1 tag plus that commit (11 lines in
+# wgpu-hal), pinned by `rev`; never delete or rewrite that branch. The whole
+# family comes from it, so the crates keep sharing one `wgpu-types` and one
+# `naga`. Remove this section with the upgrade.
+[patch.crates-io]
+naga = { git = "https://github.com/Aurora-Viewer/wgpu", rev = "3bad1916ef435277b8edb3252941020a09779ce9" }
+naga-types = { git = "https://github.com/Aurora-Viewer/wgpu", rev = "3bad1916ef435277b8edb3252941020a09779ce9" }
+wgpu = { git = "https://github.com/Aurora-Viewer/wgpu", rev = "3bad1916ef435277b8edb3252941020a09779ce9" }
+wgpu-core = { git = "https://github.com/Aurora-Viewer/wgpu", rev = "3bad1916ef435277b8edb3252941020a09779ce9" }
+wgpu-core-deps-apple = { git = "https://github.com/Aurora-Viewer/wgpu", rev = "3bad1916ef435277b8edb3252941020a09779ce9" }
+wgpu-core-deps-emscripten = { git = "https://github.com/Aurora-Viewer/wgpu", rev = "3bad1916ef435277b8edb3252941020a09779ce9" }
+wgpu-core-deps-wasm = { git = "https://github.com/Aurora-Viewer/wgpu", rev = "3bad1916ef435277b8edb3252941020a09779ce9" }
+wgpu-core-deps-windows-linux-android = { git = "https://github.com/Aurora-Viewer/wgpu", rev = "3bad1916ef435277b8edb3252941020a09779ce9" }
+wgpu-hal = { git = "https://github.com/Aurora-Viewer/wgpu", rev = "3bad1916ef435277b8edb3252941020a09779ce9" }
+wgpu-naga-bridge = { git = "https://github.com/Aurora-Viewer/wgpu", rev = "3bad1916ef435277b8edb3252941020a09779ce9" }
+wgpu-types = { git = "https://github.com/Aurora-Viewer/wgpu", rev = "3bad1916ef435277b8edb3252941020a09779ce9" }
