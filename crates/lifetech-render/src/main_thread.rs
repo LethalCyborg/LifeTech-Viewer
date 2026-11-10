@@ -1239,7 +1239,7 @@ impl Renderer {
     /// Draw a frame into a caller-owned texture instead of presenting the window.
     /// The target must belong to this renderer's device and match its output size
     /// and format. The texture stays alive until the render worker has submitted
-    /// the frame; this call alone is not a GPU completion or OpenXR release fence.
+    /// the frame; this call alone is not a GPU completion fence.
     /// No egui shapes are drawn. World draw lists, including HUDs, are supplied
     /// by the caller. Each independent view needs its own rendering history;
     /// alternating eyes through this renderer would mix temporal state.
