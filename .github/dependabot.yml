@@ -1,27 +1,24 @@
-# Weekly update PRs for the Rust crates and the GitHub actions, so the
-# project never falls behind (an agent checks them, and merges them once
-# its human agrees).
+# LifeTech Viewer: one monthly pull request with the newer versions of the
+# Rust crates, for a human to build, test (cargo test --workspace) and merge.
+# GitHub Actions are off on this repository, so nothing checks these pull
+# requests automatically: hence monthly, grouped, and few at a time.
+# The workflows are still Aurora Viewer's and are not updated from here
+# until LifeTech has its own.
 version: 2
 updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
-      interval: weekly
-    labels: [maintenance]
+      interval: monthly
+    open-pull-requests-limit: 2
+    labels: [dependencies]
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "deps"
     # held for sccache, see crates/lifetech-viewer/Cargo.toml
     ignore:
       - dependency-name: mimalloc
       - dependency-name: libmimalloc-sys
     groups:
-      crates-mineures:
+      # the small updates together, in one pull request
+      minor-and-patch:
         update-types: [minor, patch]
-
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-    labels: [maintenance]
-    commit-message:
-      prefix: "chore(ci)"
