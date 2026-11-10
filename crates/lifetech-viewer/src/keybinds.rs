@@ -1390,6 +1390,33 @@ impl KeyBindings {
         })
     }
 
+    /// Alt + an unmodified jump (`over`) or crouch key orbits the camera over
+    /// or under its focus instead of moving the avatar: key_bindings.xml,
+    /// third_person `ALT E spin_over` / `ALT C spin_under` (and `CTL_ALT`
+    /// while sitting). Derived from the current Up / Down bindings, like
+    /// `pass_wall_bindings`, so a rebinding or another layout follows; an
+    /// explicit Alt binding of the same key (Alt+Page Up) keeps its own.
+    pub fn alt_orbit_held(&self, over: bool, down: &HashSet<Input>, m: Mods) -> bool {
+        if !m.alt || m.shift {
+            return false;
+        }
+        let from = if over { Action::Up } else { Action::Down };
+        self.get(from).iter().flatten().any(|b| {
+            !b.ctrl
+                && !b.alt
+                && !b.shift
+                && down.contains(&b.input)
+                && self.triggered(&b.input, m).is_none()
+                && !self.map.iter().any(|(x, bs)| {
+                    *x != from
+                        && bs
+                            .iter()
+                            .flatten()
+                            .any(|o| o.input == b.input && o.alt && (!o.ctrl || m.ctrl) && (!o.shift || m.shift))
+                })
+        })
+    }
+
     /// Action triggered by a press: an exact modifier match wins, then a
     /// binding without modifiers when neither Ctrl nor Alt is held.
     pub fn triggered(&self, input: &Input, m: Mods) -> Option<Action> {
@@ -1655,6 +1682,29 @@ mod tests {
             let _ = kb.update_held_input(&mut down, &input, false, mods);
             assert!(!kb.held(action, &down, mods));
         }
+    }
+
+    #[test]
+    fn alt_jump_and_crouch_keys_orbit_the_camera_over_and_under() {
+        let kb = KeyBindings::us_places(layout::KeyboardLayout::wasd().movement_keys());
+        let alt = Mods {
+            alt: true,
+            ..Default::default()
+        };
+        let ctrl_alt = Mods { ctrl: true, ..alt };
+        let alt_shift = Mods { shift: true, ..alt };
+        for (code, over) in [(KeyCode::KeyE, true), (KeyCode::KeyC, false)] {
+            let down = HashSet::from([Input::key(code)]);
+            assert!(kb.alt_orbit_held(over, &down, alt), "{code:?}");
+            assert!(kb.alt_orbit_held(over, &down, ctrl_alt), "CTL_ALT while sitting");
+            assert!(!kb.alt_orbit_held(!over, &down, alt));
+            assert!(!kb.alt_orbit_held(over, &down, Mods::default()), "plain E / C still jump / crouch");
+            assert!(!kb.alt_orbit_held(over, &down, alt_shift));
+        }
+        // Alt+Page Up keeps its explicit CamOrbitOver binding, not a derived one
+        let page_up = HashSet::from([Input::key(KeyCode::PageUp)]);
+        assert!(!kb.alt_orbit_held(true, &page_up, alt));
+        assert!(kb.held(Action::CamOrbitOver, &page_up, alt));
     }
 
     #[test]
