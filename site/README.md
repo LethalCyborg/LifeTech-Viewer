@@ -11,6 +11,10 @@ LifeTech Viewer's website: a PHP site (PHP 8.5) served by CloudPanel.
 
 Nothing secret is in this folder.
 
-Deploy: copy `viewer.lifetech.systems/` into the site's folder
+- `changelog.php`: the repository's `CHANGELOG.md` as a page; the deploy
+  copies that file next to it as `changelog.md`.
+
+Deploy: copy `../CHANGELOG.md` to `viewer.lifetech.systems/changelog.md`,
+then `viewer.lifetech.systems/` into the site's folder
 (`rsync -rlt --omit-dir-times`, without `--delete`: the server keeps
 folders that are not in this repository).

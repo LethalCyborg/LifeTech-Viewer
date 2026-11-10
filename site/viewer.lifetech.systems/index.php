@@ -14,7 +14,7 @@ $source = 'https://github.com/LethalCyborg/LifeTech-Viewer';
 function ltv_builds(): array
 {
     $platforms = [
-        'windows-x64' => ['zip', 'Windows', '64-bit, Windows 10 and 11'],
+        'windows-x64-setup' => ['exe', 'Windows', 'Installer · 64-bit, Windows 10 and 11'],
         'macos-arm64' => ['dmg', 'macOS', 'Apple Silicon (M1 or later)'],
         'linux-x64' => ['tar.gz', 'Linux', '64-bit, recent distributions'],
     ];
@@ -59,7 +59,7 @@ $builds = ltv_builds();
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/site.css?v=5">
+<link rel="stylesheet" href="/assets/site.css?v=6">
 <meta property="og:title" content="LifeTech Viewer">
 <meta property="og:description" content="A Second Life viewer made for newcomers, by LifeTech Systems.">
 <meta property="og:image" content="https://viewer.lifetech.systems/assets/logo.png">
@@ -73,6 +73,7 @@ $builds = ltv_builds();
     <nav class="nav" aria-label="Main">
       <a class="opt" href="#features">Features</a>
       <a class="opt" href="#download">Download</a>
+      <a class="opt" href="/changelog.php">Changelog</a>
       <a class="opt" href="<?= $source ?>" rel="noopener">Source</a>
       <a class="btn btn-ghost btn-sm" href="https://lifetech.systems">lifetech.systems</a>
     </nav>
@@ -182,7 +183,7 @@ $builds = ltv_builds();
         </div>
 <?php endforeach; ?>
       </div>
-      <p class="note">macOS: the first time, right-click LifeTech Viewer in Applications and choose <b>Open</b> (or System Settings › Privacy &amp; Security › <b>Open Anyway</b>). Linux: unpack the archive and start <code>lifetech-viewer</code>. Windows: unzip it and start <code>lifetech-viewer.exe</code>; if SmartScreen asks, choose <b>More info</b> › <b>Run anyway</b>.</p>
+      <p class="note">macOS: the first time, right-click LifeTech Viewer in Applications and choose <b>Open</b> (or System Settings › Privacy &amp; Security › <b>Open Anyway</b>). Linux: unpack the archive and start <code>lifetech-viewer</code>. Windows: run the installer; if SmartScreen asks, choose <b>More info</b> › <b>Run anyway</b>.</p>
 <?php endif; ?>
       <div class="download">
         <div class="card">
