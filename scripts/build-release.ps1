@@ -110,7 +110,7 @@ $reportedVersion = $null
 $verifyVersion = Join-Path $src 'scripts\verify-version.ps1'
 if (Test-Path -LiteralPath $verifyVersion) {
     $reportedVersion = (& $builtExe --version | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $reportedVersion -notmatch '^Aurora Viewer (\S+)$') {
+    if ($LASTEXITCODE -ne 0 -or $reportedVersion -notmatch '^LifeTech Viewer (\S+)$') {
         throw "The built viewer did not report a valid version: '$reportedVersion'."
     }
     $exactTag = git -C $src describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --exact-match 2>$null

@@ -39,4 +39,4 @@ Copy-Item -LiteralPath (Join-Path $Source 'assets/branding/lifetech.icns') -Dest
 Get-ChildItem -LiteralPath (Join-Path $Source 'packaging/macos') -Directory -Filter '*.lproj' | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $resources -Recurse
 }
-"${Out}: Aurora Viewer $version"
+"${Out}: LifeTech Viewer $version"
