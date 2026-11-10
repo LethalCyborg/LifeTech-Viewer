@@ -14,6 +14,14 @@ declare(strict_types=1);
 //   GET  api.php?op=update&account=<uuid>&platform=<p>  → {"version","file","size","sha256"}
 //        or {"version":null}: the newest personal build for a platform
 //   GET  api.php?op=fetch&account=<uuid>&platform=<p>&file=<name>  → its bytes
+//   POST api.php?op=presence&account=<uuid>&device=<id>  body: this device's
+//        sealed presence (empty with &leave=1: gone) → {"devices":[{"device",
+//        "age","blob"}], "command":<hex or null>}: the other devices seen in
+//        the last two minutes, and a command left for this one (taken once)
+//   POST api.php?op=command&account=<uuid>&device=<id>   body: a sealed
+//        command for that device (log out, quit)
+// Presences and commands are sealed with the account's key in the viewer;
+// the server keeps them as opaque bytes (hex in the answers).
 //
 // Builds are the files of ltv-private/downloads named
 // LifeTech-Viewer-personal-<version>-<platform>.<ext> with a <file>.sha256
@@ -32,6 +40,9 @@ const LTS_MAX_TOTAL = 2 * 1024 * 1024 * 1024;
 const LTS_MAX_BLOBS = 20000;
 const LTS_FAILS = 10;           // bad tokens per address in LTS_FAIL_WINDOW
 const LTS_FAIL_WINDOW = 15 * 60;
+const LTS_DEVICE = '/^[0-9a-f]{32}$/';
+const LTS_MAX_NOTE = 4096;      // a sealed presence or command
+const LTS_SEEN = 120;           // a presence older than this is not listed
 const LTS_PLATFORMS = ['macos-arm64' => 'dmg', 'linux-x64' => 'tar.gz'];
 
 // files and folders the site's group can manage too (deploys, cleanup)
@@ -306,6 +317,69 @@ switch ($op) {
             lts_fail(500, 'write failed');
         }
         lts_json($result);
+
+    case 'presence':
+    case 'command':
+        if ($method !== 'POST') {
+            lts_fail(405, 'POST only');
+        }
+        $dir = lts_authorised($account);
+        $device = (string) ($_GET['device'] ?? '');
+        if (!preg_match(LTS_DEVICE, $device)) {
+            lts_fail(400, 'bad device');
+        }
+        $body = file_get_contents('php://input', false, null, 0, LTS_MAX_NOTE + 1);
+        if ($body === false || strlen($body) > LTS_MAX_NOTE) {
+            lts_fail(413, 'too large');
+        }
+        $sub = $op === 'presence' ? 'presence' : 'commands';
+        if (!is_dir("$dir/$sub") && !@mkdir("$dir/$sub", 0770, true)) {
+            lts_fail(500, 'cannot write');
+        }
+        $put = function (string $path, string $bytes): void {
+            $tmp = $path . '.' . bin2hex(random_bytes(6));
+            file_put_contents($tmp, $bytes);
+            rename($tmp, $path);
+        };
+        if ($op === 'command') {
+            if ($body === '') {
+                lts_fail(400, 'empty command');
+            }
+            $put("$dir/commands/$device", $body);
+            lts_json(['sent' => true]);
+        }
+        if (isset($_GET['leave'])) {
+            @unlink("$dir/presence/$device");
+            lts_json(['devices' => [], 'command' => null]);
+        }
+        if ($body === '') {
+            lts_fail(400, 'empty presence');
+        }
+        $put("$dir/presence/$device", $body);
+        $now = time();
+        $devices = [];
+        foreach (glob("$dir/presence/*") ?: [] as $path) {
+            $name = basename($path);
+            if (!preg_match(LTS_DEVICE, $name)) {
+                continue;
+            }
+            $age = $now - (int) @filemtime($path);
+            if ($age > 86400) {
+                @unlink($path);
+                continue;
+            }
+            if ($name === $device || $age > LTS_SEEN) {
+                continue;
+            }
+            $devices[] = ['device' => $name, 'age' => $age, 'blob' => bin2hex((string) file_get_contents($path))];
+        }
+        $command = null;
+        $file = "$dir/commands/$device";
+        if (is_file($file)) {
+            $command = bin2hex((string) file_get_contents($file));
+            @unlink($file);
+        }
+        lts_json(['devices' => $devices, 'command' => $command]);
 
     case 'update':
         lts_authorised($account);
