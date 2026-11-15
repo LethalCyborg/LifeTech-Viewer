@@ -1,5 +1,6 @@
 # Build output (one target per worktree, never committed)
 /target/
+/target-windows/
 **/target/
 # The macOS bundle scripts/package-macos.ps1 builds (docs/MACOS.md)
 /Aurora Viewer.app/
