@@ -3,6 +3,8 @@
 //! sibling selections without selecting an open folder's children as well.
 //! Right opens the current folder; Left closes it, or from an item or a
 //! closed folder selects the parent row (a second Left then closes it).
+//! Typed letters jump to the next row whose name starts with them
+//! (LLFolderView::handleUnicodeCharHere's type-ahead), not to the search.
 
 use super::*;
 
@@ -16,8 +18,14 @@ pub(super) fn navigate(ui: &egui::Ui, inv: &Inventory, st: &mut InventoryUi, fil
     // mode): its folders never open in place, so Left and Right stay unused.
     let explorer = st.aurora.is_some_and(|frame| frame.explorer);
     let mut keys = Vec::new();
+    let mut typed = String::new();
+    let now = ui.input(|input| input.time);
     ui.input_mut(|input| {
         input.events.retain(|event| {
+            if let egui::Event::Text(text) = event {
+                typed.push_str(text);
+                return false;
+            }
             if let egui::Event::Key {
                 key,
                 pressed: true,
@@ -42,7 +50,8 @@ pub(super) fn navigate(ui: &egui::Ui, inv: &Inventory, st: &mut InventoryUi, fil
             }
         });
     });
-    let navigated = !keys.is_empty();
+    let jumped = !typed.is_empty() && type_ahead(inv, st, filtered, &typed, now);
+    let navigated = !keys.is_empty() || jumped;
     for (arrow, shift) in keys {
         match arrow {
             Arrow::Up | Arrow::Down => step(inv, st, filtered, arrow == Arrow::Down, shift),
@@ -50,6 +59,60 @@ pub(super) fn navigate(ui: &egui::Ui, inv: &Inventory, st: &mut InventoryUi, fil
         }
     }
     navigated
+}
+
+/// A pause this long starts a new word.
+const TYPE_AHEAD_PAUSE: f64 = 1.0;
+
+/// Add `typed` to the word being typed and select the first row, from the
+/// current one down and then from the top, whose name starts with it (any
+/// case). The same letter again goes on to the next row starting with it.
+/// Returns whether a row was selected.
+fn type_ahead(inv: &Inventory, st: &mut InventoryUi, filtered: bool, typed: &str, now: f64) -> bool {
+    let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
+    let (word, at) = &mut st.type_ahead;
+    if now - *at > TYPE_AHEAD_PAUSE {
+        word.clear();
+    }
+    *at = now;
+    // A space only within a word: alone it is not a name's start.
+    word.push_str(if word.is_empty() { typed.trim_start() } else { &typed });
+    if word.is_empty() {
+        return false;
+    }
+    let word = word.to_lowercase();
+    let mut letters = word.chars();
+    let first = letters.next();
+    // "bbb" steps through the rows starting with b.
+    let repeat = letters.all(|c| Some(c) == first);
+    let prefix = if repeat {
+        &word[..first.map_or(0, char::len_utf8)]
+    } else {
+        word.as_str()
+    };
+    let order = if filtered { &st.result_tree.order } else { &st.plain.order };
+    let current = st
+        .selected
+        .filter(|id| st.selection.contains(id))
+        .and_then(|id| order.iter().position(|row| *row == id));
+    // A new single letter or a repeat moves on; a longer word may stay put.
+    let start = match current {
+        Some(index) if repeat => index + 1,
+        Some(index) => index,
+        None => 0,
+    };
+    let found = (0..order.len())
+        .map(|step| order[(start + step) % order.len()])
+        .find(|id| super::folder_name(inv, *id).to_lowercase().starts_with(prefix));
+    let Some(found) = found else {
+        return false;
+    };
+    st.selection.clear();
+    st.selection.insert(found);
+    st.anchor = Some(found);
+    st.selected = Some(found);
+    st.keyboard_selection = true;
+    true
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -261,6 +324,52 @@ mod tests {
         fold(&inv, &mut st, true, true);
         fold(&inv, &mut st, true, false);
         assert!(!st.result_tree.is_open(id(10), st.tab));
+    }
+
+    #[test]
+    fn typed_letters_jump_to_rows_starting_with_them() {
+        let id = Uuid::from_u128;
+        let mut inv = Inventory::default();
+        let names = [
+            (10, "Animations"),
+            (20, "Body Parts"),
+            (30, "Clothing"),
+            (40, "Bodies"),
+            (50, "Calling Cards"),
+        ];
+        inv.created_folders(
+            names
+                .map(|(n, name)| lifetech_net::inventory::InvFolder {
+                    id: id(n),
+                    parent: id(1),
+                    name: name.into(),
+                    ..Default::default()
+                })
+                .to_vec(),
+        );
+        let mut st = InventoryUi::default();
+        st.plain.order = vec![id(10), id(20), id(30), id(40), id(50)];
+        assert!(type_ahead(&inv, &mut st, false, "c", 0.0));
+        assert_eq!(st.selection, HashSet::from([id(30)]), "no selection: the first match");
+        assert!(type_ahead(&inv, &mut st, false, "a", 0.2));
+        assert_eq!(st.selected, Some(id(50)), "\"ca\" goes on to Calling Cards");
+        assert!(type_ahead(&inv, &mut st, false, "B", 5.0));
+        assert_eq!(st.selected, Some(id(20)), "after a pause a new word, from the top again");
+        assert!(type_ahead(&inv, &mut st, false, "b", 5.3));
+        assert_eq!(st.selected, Some(id(40)), "the same letter again: the next match");
+        assert!(type_ahead(&inv, &mut st, false, "b", 5.6));
+        assert_eq!(st.selected, Some(id(20)), "and round to the first");
+        assert!(type_ahead(&inv, &mut st, false, "bod", 9.0));
+        assert_eq!(st.selected, Some(id(20)), "a word stays on a row that matches it");
+        assert!(type_ahead(&inv, &mut st, false, "y ", 9.2));
+        assert_eq!(st.selected, Some(id(20)), "spaces within a word count");
+        assert!(!type_ahead(&inv, &mut st, false, "x", 12.0));
+        assert_eq!(st.selection, HashSet::from([id(20)]), "no match leaves the selection");
+        assert!(!type_ahead(&inv, &mut st, false, " ", 15.0), "a space alone selects nothing");
+        st.type_ahead = Default::default();
+        st.selection.clear();
+        assert!(type_ahead(&inv, &mut st, false, "bodi", 20.0));
+        assert_eq!(st.selected, Some(id(40)));
     }
 
     #[test]

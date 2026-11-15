@@ -473,7 +473,9 @@ pub struct InventoryUi {
     /// Save live splitter changes once the pointer is released.
     pub preferences_dirty: bool,
     was_open: bool,
-    focus_search: bool,
+    /// Give the list the keyboard when the window opens: typed letters
+    /// then jump to rows (keyboard::type_ahead) rather than searching.
+    focus_list: bool,
     bulk_permissions: bulk_permissions::State,
     menu_editor: context_customize::State,
     menu_notecards: context_notecards::State,
@@ -540,6 +542,8 @@ pub struct InventoryUi {
     /// Last actual scroll offset and viewport height of this window's list.
     list_viewport: Option<(f32, f32)>,
     list_focus_frame: Option<u64>,
+    /// Letters typed into the list and when the last one came.
+    type_ahead: (String, f64),
     visible: Vec<Uuid>,
     pub clipboard: Vec<Uuid>,
     pub cut: bool,
@@ -2103,7 +2107,7 @@ pub fn show(
 ) -> Vec<InvAction> {
     let mut actions = Vec::new();
     clipboard::prepare(st);
-    st.focus_search = *open && (st.focus_search || !st.was_open);
+    st.focus_list = *open && (st.focus_list || !st.was_open);
     // What is worn, the attachment points and the names are read for the
     // windows and dialogs that show them, not every frame while closed.
     let shown = *open
@@ -2280,7 +2284,7 @@ pub fn show(
         if w.id == listings::PANEL && w.state.fetch_all {
             fetch_whole_inventory(&mut world.inventory, &mut w.state);
         }
-        w.state.focus_search = w.open && (w.state.focus_search || !w.state.was_open);
+        w.state.focus_list = w.open && (w.state.focus_list || !w.state.was_open);
         if w.id != listings::PANEL {
             w.state.visible.clear();
         }
@@ -3001,7 +3005,7 @@ mod tests {
     }
 
     #[test]
-    fn opening_inventory_focuses_search_without_taking_it_back() {
+    fn opening_inventory_gives_the_list_the_keys_without_taking_them_back() {
         use crate::ui::widgets::elide_tests::Frames;
         for classic in [false, true] {
             let mut frames = Frames::new();
@@ -3041,20 +3045,20 @@ mod tests {
             for _ in 0..3 {
                 frame(&mut st, true, Vec::new());
             }
-            frame(&mut st, true, vec![egui::Event::Text("instructions".into())]);
-            assert_eq!(st.search, "instructions", "classic={classic}");
-            let search = ctx.memory(|m| m.focused()).expect("search focused");
-            assert_ne!(search, other_id);
+            frame(&mut st, true, vec![egui::Event::Text("c".into())]);
+            assert!(st.search.is_empty(), "classic={classic}: letters do not search");
+            let list = ctx.memory(|m| m.focused()).expect("list focused");
+            assert_ne!(list, other_id);
             ctx.memory_mut(|m| m.request_focus(other_id));
             frame(&mut st, true, Vec::new());
             frame(&mut st, true, vec![egui::Event::Text("elsewhere".into())]);
-            assert!(ctx.memory(|m| m.has_focus(other_id)));
-            assert_eq!(st.search, "instructions");
+            assert!(ctx.memory(|m| m.has_focus(other_id)), "the list does not take it back");
+            assert!(st.search.is_empty());
             frame(&mut st, false, Vec::new());
             frame(&mut st, true, Vec::new());
-            assert!(ctx.memory(|m| m.has_focus(search)), "reopening restores search focus");
-            frame(&mut st, true, vec![egui::Event::Text("!".into())]);
-            assert_eq!(st.search, "instructions!");
+            assert!(ctx.memory(|m| m.has_focus(list)), "reopening gives the list the keys again");
+            frame(&mut st, true, vec![egui::Event::Text("b".into())]);
+            assert!(st.search.is_empty(), "classic={classic}");
             super::super::widgets::minimize_floater(&ctx, "inventory");
             frame(&mut st, true, Vec::new());
             ctx.memory_mut(|m| m.request_focus(other_id));
@@ -3063,7 +3067,7 @@ mod tests {
             for _ in 0..3 {
                 frame(&mut st, true, Vec::new());
             }
-            assert!(ctx.memory(|m| m.has_focus(search)), "expanding restores search focus");
+            assert!(ctx.memory(|m| m.has_focus(list)), "expanding gives the list the keys again");
             assert_eq!(other, "elsewhere");
         }
     }

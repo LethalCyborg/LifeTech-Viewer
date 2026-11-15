@@ -10808,6 +10808,8 @@ impl App {
                             | "aurora-keyboard"
                             | "aurora-keyboard-fold"
                             | "aurora-keyboard-wide"
+                            | "keyboard-type"
+                            | "aurora-keyboard-type"
                     ) || v.starts_with("note-")
                         || v.starts_with("clipboard-")
                         || v.starts_with("aurora-menu-")
@@ -20128,6 +20130,8 @@ impl ApplicationHandler for App {
                             | "aurora-keyboard"
                             | "aurora-keyboard-fold"
                             | "aurora-keyboard-wide"
+                            | "keyboard-type"
+                            | "aurora-keyboard-type"
                             | "link-icons"
                             | "aurora-link-icons"
                     ) {

@@ -145,7 +145,11 @@ pub(super) fn list_focus(ui: &mut egui::Ui, st: &mut InventoryUi, height: f32) {
         && !egui::Popup::is_any_open(ui.ctx())
         && st.list_focus_frame.is_some_and(|frame| ui.ctx().cumulative_frame_nr() <= frame + 1)
         && ui.memory(|m| m.focused().is_none() && m.allows_interaction(ui.layer_id()));
-    if response.clicked() || response.has_focus() || restore {
+    let opening = st.focus_list && !ui.is_sizing_pass() && ui.is_enabled();
+    if opening {
+        st.focus_list = false;
+    }
+    if response.clicked() || response.has_focus() || restore || opening {
         request_focus(ui, st);
     }
 }
@@ -420,6 +424,22 @@ pub fn demo_events(ctx: &egui::Context, frame: u64, st: &mut InventoryUi) -> Vec
     let Some(mode) = demo_mode().filter(|mode| *mode != "clipboard") else {
         return Vec::new();
     };
+    // Letters typed into the window just opened, nothing clicked first:
+    // C selects the first row starting with C, C again the next one.
+    if mode == "keyboard-type" {
+        if matches!(frame, 675 | 690) {
+            log::info!(
+                "demo inventory type-ahead: frame={frame}, search={:?}, selected={:?}, visible={}",
+                st.search,
+                st.selected,
+                st.selected.is_some_and(|id| st.visible.contains(&id))
+            );
+        }
+        return match frame {
+            665 | 680 => vec![egui::Event::Text("c".into())],
+            _ => Vec::new(),
+        };
+    }
     if mode.starts_with("keyboard") || mode.starts_with("aurora-keyboard") {
         if matches!(frame, 650 | 651)
             && let Some(pos) =
