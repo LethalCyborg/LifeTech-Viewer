@@ -229,7 +229,10 @@ pub(super) fn draw(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::world::Ch
             let r = ui.add(
                 super::super::widgets::elided_label(
                     ui,
-                    RichText::new(&name).size(chat_size(ui.ctx(), 11.5)).strong().color(col),
+                    RichText::new(super::with_username(&name, super::sender_username(world, line).as_deref()))
+                        .size(chat_size(ui.ctx(), 11.5))
+                        .strong()
+                        .color(col),
                     max_bubble,
                 )
                 .sense(egui::Sense::click()),

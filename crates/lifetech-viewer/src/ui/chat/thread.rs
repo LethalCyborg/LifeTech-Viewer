@@ -296,9 +296,10 @@ pub(super) fn tag(ui: &mut egui::Ui, text: &str, fill: Option<Color32>, color: C
     crate::ui::widgets::paint_row_text(ui.painter(), galley, rect.left() + pad, rect.center().y, color);
 }
 
-/// The name of a head or a compact row: clickable to the profile, with the
+/// The name of a head or a compact row, "Jane Doe (janedoe)": clickable to the profile, with the
 /// author's menu on a right click.
 fn name_label(ui: &mut egui::Ui, env: &LineEnv, line: &ChatLine, name: &str, color: Color32, who: &Who, max: f32) {
+    let name = super::with_username(name, super::sender_username(env.world, line).as_deref());
     let text = RichText::new(name)
         .font(egui::FontId::new(chat_size(ui.ctx(), 13.5), crate::ui::fonts::semibold(ui.ctx())))
         .color(color);

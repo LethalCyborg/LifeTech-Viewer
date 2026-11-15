@@ -1997,12 +1997,12 @@ fn header_time(ui: &egui::Ui, p: &Palette, time: String) -> std::sync::Arc<egui:
     egui::WidgetText::from(text).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Body)
 }
 
-/// Narrower than this, the "- username" of a header is left out (it then
+/// Narrower than this, the "(username)" of a header is left out (it then
 /// shows on hover of the name) rather than reduced to an ellipsis.
 const USERNAME_MIN_W: f32 = 36.0;
 
-/// Sender of a message header: the display name, then " - username" in
-/// small (FSChatHistoryHeader). Both are cut with an ellipsis so that
+/// Sender of a message header: the display name, then "(username)" in
+/// small (FSChatHistoryHeader shows it as " - username"). Both are cut with an ellipsis so that
 /// `reserve` pixels stay free at the right of the row for the time, as the
 /// user_name text of panel_chat_header.xml is (use_ellipses="true", the time
 /// box keeps its place); what was cut shows on hover. Returns the response
@@ -2025,7 +2025,7 @@ fn header_names(ui: &mut egui::Ui, p: &Palette, name: &str, username: Option<&st
     if room < USERNAME_MIN_W {
         return r.on_hover_text(u);
     }
-    let text = RichText::new(format!("- {u}"))
+    let text = RichText::new(format!("({u})"))
         .size(super::fonts::chat_size(ui.ctx(), 11.5))
         .color(p.indigo_light);
     ui.add(super::widgets::elided_label(ui, text, room));
@@ -2052,6 +2052,30 @@ pub(crate) fn sender_name(world: &World, own_name: &str, line: &crate::world::Ch
         Some(n) => n.display(&names.options),
         None if own && !logged => own_name.to_owned(),
         None => world.rlva_filter_text(&line.from).into_owned(),
+    }
+}
+
+/// The sender's username, shown after the display name when the two differ
+/// (LLAvatarName::getCompleteName): none for an object, a history line, a
+/// default display name, a name RLVa hides, or with Show usernames off.
+pub(crate) fn sender_username(world: &World, line: &crate::world::ChatLine) -> Option<String> {
+    if line.origin != Origin::Live || matches!(line.kind, ChatKind::Object(_) | ChatKind::ObjectIm) {
+        return None;
+    }
+    let id = if line.kind.is_own() { world.agent_id } else { line.source };
+    if id.is_nil() || !world.rlva_can_name(id) {
+        return None;
+    }
+    let names = &world.social.avatar_names;
+    names.get(&id).and_then(|n| n.chat_username(&names.options))
+}
+
+/// "Jane Doe (janedoe)", or the name alone when there is no username or it
+/// reads the same.
+pub(crate) fn with_username(name: &str, username: Option<&str>) -> String {
+    match username {
+        Some(u) if !u.eq_ignore_ascii_case(name) => format!("{name} ({u})"),
+        _ => name.to_owned(),
     }
 }
 
@@ -2588,7 +2612,7 @@ pub(crate) fn draw_line(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::worl
     }
     let own = line.kind.is_own();
     let object = matches!(line.kind, ChatKind::Object(_) | ChatKind::ObjectIm);
-    // FSChatHistoryHeader: the display name, then " - username" in small
+    // FSChatHistoryHeader: the display name, then "(username)" in small
     let names = &world.social.avatar_names;
     let cached = if object || logged {
         None
@@ -2602,7 +2626,7 @@ pub(crate) fn draw_line(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::worl
     };
     if look.header {
         ui.add_space(6.0);
-        let username = cached.and_then(|n| n.chat_username(&names.options));
+        let username = sender_username(world, line).filter(|u| !u.eq_ignore_ascii_case(&name));
         egui::Frame::new()
             .fill(p.raised.gamma_multiply(0.55))
             .corner_radius(ui.visuals().window_corner_radius)
@@ -5951,9 +5975,16 @@ mod tests {
     }
 
     #[test]
+    fn a_sender_shows_its_username_in_brackets_when_it_differs() {
+        assert_eq!(with_username("Jane Doe", Some("janedoe")), "Jane Doe (janedoe)");
+        assert_eq!(with_username("janedoe", Some("JaneDoe")), "janedoe");
+        assert_eq!(with_username("Jane Doe", None), "Jane Doe");
+    }
+
+    #[test]
     fn header_names_stop_before_the_time() {
         let mut frames = Frames::new();
-        let small = format!("- {USERNAME}");
+        let small = format!("({USERNAME})");
         for name in [LONG, WIDE, SHORT] {
             for width in (90..=1200).step_by(11).map(|w| w as f32) {
                 let mut rects = None;
@@ -5969,7 +6000,14 @@ mod tests {
                 if let Some(u) = texts.iter().find(|t| t.source == small) {
                     assert!(u.rect.left() >= name_rect.right());
                     assert!(u.rect.right() <= time.left() + 0.01, "username under the time at {width} px");
-                    assert!(u.rect.width() >= USERNAME_MIN_W || !u.cut);
+                    // (an ellipsis lands between two letters: up to one
+                    // letter narrower than the room it was given)
+                    assert!(
+                        u.rect.width() >= USERNAME_MIN_W - 8.0 || !u.cut,
+                        "{name:?} at {width} px: {:?} is {} px",
+                        u.shown,
+                        u.rect.width()
+                    );
                 }
             }
         }
@@ -5978,7 +6016,7 @@ mod tests {
     #[test]
     fn header_names_are_whole_when_there_is_room() {
         let mut frames = Frames::new();
-        let small = format!("- {USERNAME}");
+        let small = format!("({USERNAME})");
         let texts = frames.run(Vec::new(), |ui| {
             header(ui, 1200.0, LONG, Some(USERNAME));
         });
