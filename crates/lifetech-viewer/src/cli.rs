@@ -15,6 +15,10 @@ pub struct Cli {
     pub language: Option<String>,
     /// Additional cap for this process only, including captures and online tests.
     pub fps_limit: Option<u32>,
+    /// `--vr`: enter VR once the world shows (the restart that the VR
+    /// button offers when the headset came after startup passes it).
+    pub vr: bool,
+    pub vr_mode: crate::camera::VrView,
     /// `--grid <name>` or `--loginuri <uri>` (CmdLineGridChoice,
     /// CmdLineLoginURI): the grid the login screen starts on.
     pub grid: Option<Grid>,
@@ -113,6 +117,14 @@ fn parse(args: impl Iterator<Item = String>) -> Cli {
             cli.title = Some(v.to_owned());
         } else if a == "--title" {
             cli.title = args.next();
+        } else if a == "--vr" {
+            cli.vr = true;
+        } else if let Some(mode) = a.strip_prefix("--vr-mode=") {
+            cli.vr_mode = match mode {
+                "avatar" => crate::camera::VrView::Avatar,
+                "flycam" => crate::camera::VrView::Flycam,
+                _ => crate::camera::VrView::FirstPerson,
+            };
         } else if let Some(v) = a.strip_prefix("--fps-limit=") {
             cli.fps_limit = parse_fps_limit(v);
         } else if a == "--fps-limit" {
@@ -295,25 +307,24 @@ mod tests {
 
     #[test]
     fn title_ends_with_the_build_profile() {
+        // the catalogue's own words: a language may join the name, the
+        // version and the title another way than " - " (Japanese does), and
+        // translate "Debug"
+        let named = |version: &str, title: &str| lifetech_i18n::tr!("cli-lifetech-viewer-2", version = version, t = title);
+        let plain = |version: &str| lifetech_i18n::tr!("cli-lifetech-viewer", version = version);
         assert_eq!(
             title_with(Some("Test ombres"), "debug", "0.2.0"),
-            lifetech_i18n::tr!("cli-lifetech-viewer", version = "0.2.0 - Test ombres (Dev)").as_str()
+            format!("{} (Dev)", named("0.2.0", "Test ombres"))
         );
-        assert_eq!(
-            title_with(None, "release", "0.2.0"),
-            lifetech_i18n::tr!("cli-lifetech-viewer", version = "0.2.0 (Release)").as_str()
-        );
+        assert_eq!(title_with(None, "release", "0.2.0"), format!("{} (Release)", plain("0.2.0")));
         assert_eq!(
             title_with(None, "debugging", "0.2.0"),
-            lifetech_i18n::tr!("cli-lifetech-viewer", version = "0.2.0 (Debug)").as_str()
+            format!("{} ({})", plain("0.2.0"), lifetech_i18n::tr!("common-debug"))
         );
-        assert_eq!(
-            title_with(Some("X"), "unknown", "0.2.0"),
-            lifetech_i18n::tr!("cli-lifetech-viewer", version = "0.2.0 - X").as_str()
-        );
+        assert_eq!(title_with(Some("X"), "unknown", "0.2.0"), named("0.2.0", "X"));
         assert_eq!(
             title_with(None, "debug", "0.2.0+7.gabcdef123"),
-            lifetech_i18n::tr!("cli-lifetech-viewer", version = "0.2.0+7.gabcdef123 (Dev)").as_str()
+            format!("{} (Dev)", plain("0.2.0+7.gabcdef123"))
         );
     }
 

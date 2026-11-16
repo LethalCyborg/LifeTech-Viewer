@@ -44,8 +44,18 @@ git merge aurora
 - lines both changed are a **conflict**: git marks them in the file
   (`<<<<<<<`, `=======`, `>>>>>>>`). Keep LifeTech's, Aurora's, or combine
   them, remove the marks, then `git add` the file;
-- a file LifeTech deleted (the VR files) and Aurora changed: keep it
-  deleted with `git rm <file>`.
+- a file LifeTech deleted and Aurora changed: keep it deleted with
+  `git rm <file>`, or take Aurora's back (`git checkout aurora -- <file>`)
+  when other Aurora code now needs it.
+
+**VR** is kept in the code as Aurora has it, but hidden: no toolbar button
+(`Toolbar::drop_vr_button`), no VR page in Preferences (`Page::Vr` is left
+out of `Page::ALL`), no VR switch on the Camera page, no `--vr` in the help,
+and the VR runtime is never loaded at startup (`camera.vr_at_start` stays
+off). LifeTech 1.0 had cut the VR code out, but Aurora kept building on it
+(the camera, the gamepad, the renderer): taking its VR code as it is keeps
+every later merge small. In a clash, take Aurora's VR lines and keep these
+entry points hidden.
 
 Then build and test before committing the merge:
 
@@ -82,3 +92,7 @@ own where possible (`world/starter_looks.rs`, `ui/starter_picker.rs`,
 
 Aurora's new interface texts arrive with "Aurora" in them: rename them in
 the merge (the "LifeTech" texts are LifeTech's edits, not the script's).
+After the merge of Aurora 47af7aed, every value that said "Aurora" was
+changed to "LifeTech" (keys and comments untouched); `about-based-on` keeps
+Aurora's name on purpose. Aurora's tests that name its own folders (`#Aurora`,
+`Aurora Library`) take LifeTech's (`#LifeTech`, `Build Chest`).

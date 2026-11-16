@@ -538,6 +538,7 @@ mod tests {
             owner_id: w.agent_id,
             source_type: lifetech_net::ChatSourceType::Object,
             chat_type: lifetech_net::ChatType::OwnerSay,
+            region: None,
             position: glam::Vec3::ZERO,
             message: "@startim=n".into(),
         }));

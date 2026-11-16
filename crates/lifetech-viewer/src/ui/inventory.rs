@@ -25,6 +25,7 @@ mod bulk_permissions;
 pub use bulk_permissions::demo_menu as bulk_permissions_demo;
 mod clipboard;
 pub use clipboard::demo_events as clipboard_demo_events;
+pub(crate) use clipboard::return_focus_to;
 mod context;
 mod context_catalog;
 pub(crate) mod context_customize;
@@ -33,6 +34,8 @@ mod controls;
 pub(crate) use controls::recent_period;
 pub(crate) mod default_permissions;
 mod delete;
+pub use delete::DeleteRequest;
+pub(crate) use delete::DeleteSelection;
 pub(crate) mod menu_layout;
 pub use delete::demo_events as delete_demo_events;
 mod dialogs;
@@ -69,7 +72,8 @@ pub use aurora::{DEMO_FOLDER_WINDOW as AURORA_DEMO_FOLDER_WINDOW, demo_place as 
 /// A demo scenario written for the Legacy Viewer's window (its tabs, its
 /// footer): every `AURORA_DEMO_INVENTORY` mode but Aurora's own.
 pub fn legacy_demo() -> bool {
-    delete::demo_enabled() || std::env::var("AURORA_DEMO_INVENTORY").is_ok_and(|mode| !mode.starts_with("aurora"))
+    (delete::demo_enabled() && !aurora::demo_active())
+        || std::env::var("AURORA_DEMO_INVENTORY").is_ok_and(|mode| !mode.starts_with("aurora"))
 }
 
 /// Aurora's own demo scenarios show its window whatever the preference.
@@ -112,7 +116,19 @@ pub fn show_document(
         names: Default::default(),
         ..Default::default()
     };
-    dialogs::preview(ctx, p, icons, inv, drag_inventory, st, images, prefs, script_settings, &mut actions);
+    dialogs::preview(
+        ctx,
+        p,
+        icons,
+        inv,
+        drag_inventory,
+        st,
+        images,
+        prefs,
+        script_settings,
+        facts.god_level,
+        &mut actions,
+    );
     dialogs::show(ctx, p, icons, inv, st, prefs, &facts, images, &mut actions);
     actions
 }
@@ -132,6 +148,8 @@ pub enum InvAction {
     CopyLandmarkSlurl(Uuid),
     ShowLandmarkOnMap(Uuid),
     Edit(Mutation),
+    /// A deletion's selection advances only on this request's success.
+    Delete(Box<DeleteRequest>),
     /// The same change from a drag dropped on a folder: the listings ask
     /// some questions for a drag only (LLFolderBridge::dragCategoryIntoFolder).
     Drop(Mutation),
@@ -161,7 +179,8 @@ pub enum InvAction {
         items: Vec<Uuid>,
         resident: Uuid,
     },
-    Preview(Uuid),
+    /// Preview the item and return to its originating inventory list when it closes.
+    Preview(Uuid, Option<egui::Id>),
     /// Open a sky or water settings item in its editor (LLSettingsBridgeAction).
     EditEnvironment(Uuid),
     Gesture(crate::ui::gestures::Action),
@@ -177,12 +196,16 @@ pub enum InvAction {
         text: String,
         close: bool,
     },
-    Environment(Uuid, u32),
+    /// A sky, water or day for myself: its asset, flags and item.
+    Environment(Uuid, u32, Uuid),
     EnvironmentParcel(Uuid),
     ExportTextures {
         items: Vec<Uuid>,
         png: bool,
     },
+    /// Preferences › Confirmations / Inventory: stop asking before a Trash
+    /// move (`DeleteItems` ignore box). Purge still always asks (#2344).
+    StopConfirmingDelete,
     WearLibrary {
         item: Uuid,
         replace: bool,
@@ -220,6 +243,10 @@ pub enum InvAction {
 #[derive(Default)]
 pub struct Facts {
     pub agent: Uuid,
+    /// We hold a god level (Copy Asset UUID of any item).
+    pub god: bool,
+    /// The server-granted god level (actions::with_god).
+    pub god_level: u8,
     pub worn: HashSet<Uuid>,
     pub active_gestures: std::collections::BTreeSet<Uuid>,
     pub worn_labels: std::collections::HashMap<Uuid, String>,
@@ -236,7 +263,7 @@ pub struct Facts {
     pub online: HashSet<Uuid>,
     pub parcel_environment: bool,
     /// What RLVa locks leave of wearing and taking off, for the menus.
-    pub rlva: crate::world::rlva::WearLocks,
+    pub rlva: std::sync::Arc<crate::world::rlva::WearLocks>,
     /// RLVa @tplm (or @unsit while seated): a landmark's Teleport is greyed
     /// (LLLandmarksPanel "teleport", LLPanelPlaces' Teleport button).
     pub landmark_blocked: bool,
@@ -274,6 +301,8 @@ impl Facts {
             .collect();
         Self {
             agent: world.agent_id,
+            god: world.god_level > 0,
+            god_level: world.god_level,
             worn,
             active_gestures: world.active_gestures.clone(),
             worn_labels,
@@ -299,10 +328,7 @@ impl Facts {
                 .is_some_and(|parcel| {
                     crate::world::env_apply::can_update_parcel(
                         parcel,
-                        &crate::world::land::AgentRights {
-                            id: world.agent_id,
-                            groups: &world.groups.groups,
-                        },
+                        &world.agent_rights(),
                         world
                             .main_region
                             .and_then(|handle| world.regions.get(&handle))
@@ -378,7 +404,7 @@ pub struct PropertyEdit {
 impl From<&lifetech_net::inventory::InvItem> for PropertyEdit {
     fn from(it: &lifetech_net::inventory::InvItem) -> Self {
         Self {
-            name: it.name.clone(),
+            name: shown_name(it).to_owned(),
             desc: it.desc.clone(),
             next: it.next_owner_mask,
             group: it.group_mask,
@@ -421,6 +447,16 @@ pub struct InvDrag(pub Uuid);
 /// A single folder dragged to inventory or Marketplace listings.
 #[derive(Debug, Clone, Copy)]
 pub struct FolderDrag(pub Uuid);
+
+/// An object embedded in an open notecard, dragged out of its text
+/// (LLViewerTextEditor::handleHover, SOURCE_NOTECARD): the editor and the
+/// notecard that hold it, and its marker in the text.
+#[derive(Debug, Clone, Copy)]
+pub struct NotecardDrag {
+    pub editor: Uuid,
+    pub notecard: Uuid,
+    pub marker: char,
+}
 
 pub(crate) struct WorldDrag {
     pub item: Uuid,
@@ -476,6 +512,9 @@ pub struct InventoryUi {
     /// Give the list the keyboard when the window opens: typed letters
     /// then jump to rows (keyboard::type_ahead) rather than searching.
     focus_list: bool,
+    /// A request to give the search field the keyboard on the next frame
+    /// (never on open: the list takes it then, for type-ahead).
+    focus_search: bool,
     bulk_permissions: bulk_permissions::State,
     menu_editor: context_customize::State,
     menu_notecards: context_notecards::State,
@@ -539,11 +578,19 @@ pub struct InventoryUi {
     pub selection: HashSet<Uuid>,
     anchor: Option<Uuid>,
     keyboard_selection: bool,
+    /// "Do not show again" on the Delete confirmation (Trash moves only).
+    delete_dont_ask: bool,
+    pending_delete: Option<Box<delete::PendingDelete>>,
     /// Last actual scroll offset and viewport height of this window's list.
     list_viewport: Option<(f32, f32)>,
     list_focus_frame: Option<u64>,
     /// Letters typed into the list and when the last one came.
     type_ahead: (String, f64),
+    /// Which row order the list drew last, for the work done outside it.
+    shown_order: keyboard::ShownOrder,
+    /// The list's focus target that opened this document window, so closing
+    /// it hands the keyboard back there (see `clipboard::return_focus_to`).
+    document_owner: Option<egui::Id>,
     visible: Vec<Uuid>,
     pub clipboard: Vec<Uuid>,
     pub cut: bool,
@@ -746,11 +793,14 @@ impl InventoryUi {
         self.selection.clear();
         self.selection.insert(id);
         self.reveal = Some(id);
-        self.rename = Some(InlineRename {
-            id,
-            name: rules::name(inv, id),
-            focus: true,
-        });
+        // a coded settings item: its name without the Aurora Weather code,
+        // which the rename keeps (`finish_rename`)
+        let name = inv
+            .items
+            .get(&id)
+            .and_then(weather_coded_name)
+            .map_or_else(|| rules::name(inv, id), str::to_owned);
+        self.rename = Some(InlineRename { id, name, focus: true });
         self.message.clear();
     }
     /// show_item_original: clear filters, expand ancestors, select and scroll to the original.
@@ -1000,6 +1050,8 @@ pub fn item_icon(asset_type: i32, inv_type: i32, flags: u32) -> &'static str {
         (5 | 13, _) => wearable_icon(asset_type, flags),
         (6, _) => "Inv_Object",
         (7, _) => "Inv_Notecard",
+        // LLInventoryIcon::getIconName: SST_LUA scripts get Inv_Script_Luau
+        (10, _) if lifetech_net::scripts::is_slua_item(flags) => "Inv_Script_Luau",
         (10, _) => "Inv_Script",
         (20, _) => "Inv_Animation",
         (21, _) => "Inv_Gesture",
@@ -1094,6 +1146,36 @@ fn icon(ui: &mut egui::Ui, icons: &Icons, name: &str, p: &Palette) {
     tree::icon(ui, icons, name, p, None);
 }
 
+/// A settings item's name without its Aurora Weather code (weather/region.rs),
+/// when it has one: shown with [`weather_tag`] instead.
+pub(crate) fn weather_coded_name(it: &lifetech_net::inventory::InvItem) -> Option<&str> {
+    if it.asset_type != 56 {
+        return None;
+    }
+    crate::weather::region::coded_name(&it.name)
+}
+
+/// The name an item's fields show: a coded settings item's without its
+/// code, which a rename keeps (`weather::region::keep_code`).
+pub(crate) fn shown_name(it: &lifetech_net::inventory::InvItem) -> &str {
+    weather_coded_name(it).unwrap_or(&it.name)
+}
+
+/// " [Aurora Weather]" after a coded settings item's name, "Aurora" in the
+/// aurora gradient (as the Environment window's section), the rest muted.
+pub(crate) fn weather_tag(p: &Palette, job: &mut egui::text::LayoutJob, font: egui::FontId) {
+    job.append(" [", 0.0, egui::TextFormat::simple(font.clone(), p.muted));
+    let tag = crate::ui::options::aurora_word(p, lifetech_i18n::tr!("ui-weather-aurora"), font.clone(), p.muted);
+    let start = job.text.len();
+    job.text.push_str(&tag.text);
+    for mut section in tag.sections {
+        section.byte_range = section.byte_range.start + start..section.byte_range.end + start;
+        section.leading_space = 0.0;
+        job.sections.push(section);
+    }
+    job.append("]", 0.0, egui::TextFormat::simple(font, p.muted));
+}
+
 fn item_row(
     ui: &mut egui::Ui,
     p: &Palette,
@@ -1124,15 +1206,20 @@ fn item_row(
         }
         let worn = facts.worn_label(inv, *id);
         let font_id = egui::FontId::proportional(13.0);
-        let mut label = super::widgets::name_with_suffix(&it.name, "", font_id.clone(), p.ink);
+        let coded = weather_coded_name(it);
+        let shown = coded.unwrap_or(&it.name);
+        let mut label = super::widgets::name_with_suffix(shown, "", font_id.clone(), p.ink);
         if worn.is_some()
             && let Some(section) = label.sections.first_mut()
         {
             super::widgets::embolden(ui, &mut section.format);
         }
+        if coded.is_some() {
+            weather_tag(p, &mut label, font_id.clone());
+        }
         let name = worn
             .filter(|_| super::widgets::faux_bold_offset(ui).is_some())
-            .map(|_| ui.painter().layout_no_wrap(it.name.clone(), font_id, p.ink));
+            .map(|_| ui.painter().layout_no_wrap(shown.to_owned(), font_id, p.ink));
         // The same worn tag as Aurora's rows and Appearance, before the rights.
         let tag = worn.map(|worn| (p, worn, super::widgets::reserve_row_tag(ui, &mut label, worn, p), true));
         let permissions = permissions::Permissions::inventory(inv, *id).map(|permissions| permissions.with_next_owner(st.show_next_owner));
@@ -1464,7 +1551,7 @@ fn status(
                 .color(p.muted),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            delete::button(ui, p, inv, st, prefs, facts);
+            delete::button(ui, p, inv, st, prefs, facts, actions);
             if st.busy() {
                 ui.add(egui::Spinner::new().size(14.0).color(p.violet));
             }
@@ -1550,7 +1637,10 @@ fn request_search(inv: &mut Inventory, root: Uuid, st: &mut InventoryUi, prefs: 
             continue;
         }
         complete &= folder.state == FetchState::Fetched;
-        if matches!(folder.state, FetchState::Unknown | FetchState::Failed) && inv.queue.len() + requests.len() < 16 {
+        if !inv.too_big.contains(&id)
+            && matches!(folder.state, FetchState::Unknown | FetchState::Failed)
+            && inv.queue.len() + requests.len() < 16
+        {
             requests.push(id);
         }
         todo.extend(folder.children.iter().copied());
@@ -1767,7 +1857,12 @@ fn finish_rename(inv: &Inventory, st: &mut InventoryUi, actions: &mut Vec<InvAct
     if !rules::renameable(inv, edit.id) {
         return;
     }
-    match rules::clean_name(&edit.name) {
+    // a coded settings item keeps its weather code (`begin_rename`)
+    let typed = rules::clean_name(&edit.name).map(|name| match inv.items.get(&edit.id).filter(|it| weather_coded_name(it).is_some()) {
+        Some(it) => crate::weather::region::keep_code(&it.name, &name),
+        None => name,
+    });
+    match typed {
         Ok(name) if name == rules::name(inv, edit.id) => return,
         Ok(name) if st.pending.is_none() => match rules::patch(inv, edit.id, lifetech_llsd::llsd_map! { "name" => name }) {
             Ok(change) => {
@@ -2107,6 +2202,9 @@ pub fn show(
 ) -> Vec<InvAction> {
     let mut actions = Vec::new();
     clipboard::prepare(st);
+    if !*open {
+        st.pending_delete = None;
+    }
     st.focus_list = *open && (st.focus_list || !st.was_open);
     // What is worn, the attachment points and the names are read for the
     // windows and dialogs that show them, not every frame while closed.
@@ -2193,7 +2291,7 @@ pub fn show(
         }
     }
     let inv = &mut world.inventory;
-    context_catalog::process_deferred(inv, st, prefs, &facts);
+    context_catalog::process_deferred(inv, st, prefs, &facts, &mut actions);
     bulk_permissions::show(ctx, p, inv, st, world.agent_id, &mut actions);
     st.visible.clear();
     fetch_whole_inventory(inv, st);
@@ -2254,7 +2352,19 @@ pub fn show(
     finish_hidden_rename(inv, st, &mut actions);
     dialogs::show(ctx, p, icons, inv, st, prefs, &facts, images, &mut actions);
     move_to::show(ctx, p, icons, inv, st, prefs, &facts, &mut actions);
-    dialogs::preview(ctx, p, icons, inv, inv, st, images, prefs, script_settings, &mut actions);
+    dialogs::preview(
+        ctx,
+        p,
+        icons,
+        inv,
+        inv,
+        st,
+        images,
+        prefs,
+        script_settings,
+        facts.god_level,
+        &mut actions,
+    );
     st.thumbnail.show(
         ctx,
         p,
@@ -2275,6 +2385,9 @@ pub fn show(
     let mut windows = std::mem::take(&mut st.windows);
     let mut spawned = Vec::new();
     for w in &mut windows {
+        if !w.open {
+            w.state.pending_delete = None;
+        }
         if !w.root.is_nil() && !world.inventory.folders.contains_key(&w.root) {
             w.open = false;
             w.state.menu_editor.finish_inventory_frame(ctx, &mut prefs.context_menus);
@@ -2389,7 +2502,7 @@ pub fn show(
         }
         controls::dialogs(ctx, p, &mut w.state, prefs);
         folder_colors::show(ctx, p, &world.inventory, &mut w.state, prefs);
-        context_catalog::process_deferred(&mut world.inventory, &mut w.state, prefs, &facts);
+        context_catalog::process_deferred(&mut world.inventory, &mut w.state, prefs, &facts, &mut actions);
         dialogs::show(ctx, p, icons, &world.inventory, &mut w.state, prefs, &facts, images, &mut actions);
         move_to::show(ctx, p, icons, &mut world.inventory, &mut w.state, prefs, &facts, &mut actions);
         dialogs::preview(
@@ -2402,6 +2515,7 @@ pub fn show(
             images,
             prefs,
             script_settings,
+            facts.god_level,
             &mut actions,
         );
         w.state.thumbnail.show(
@@ -3414,6 +3528,7 @@ mod tests {
         // A snapshot is a texture whatever its asset type says.
         assert_eq!(item_icon_color(0, 15, &p), p.indigo_light);
         assert_eq!(item_icon_color(24, 24, &p), p.muted);
+        assert_eq!(item_icon_color(10, 10, &p), p.teal);
     }
 
     #[test]
@@ -4780,9 +4895,11 @@ mod tests {
         let mut outside = nested.clone();
         outside.id = Uuid::from_u128(8200);
         outside.parent = Uuid::from_u128(8002);
+        // the item's own name ("Instructions…"), in the language's words
+        let search = inv.items[&Uuid::from_u128(8103)].name.clone();
         inv.add_items(vec![nested, outside]);
         let mut st = InventoryUi {
-            search: "instructions".into(),
+            search,
             ..Default::default()
         };
         folder_window_frame(&ctx, &mut inv, root, &mut st);

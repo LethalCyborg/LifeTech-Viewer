@@ -181,6 +181,9 @@ pub struct Renderer {
     /// Where the backend runs. First field: dropped first, so the render
     /// thread has left before the scene's stores go.
     host: Host,
+    vr: Arc<crate::vr_control::Control>,
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    _xr_graphics: Option<crate::xr_device::Graphics>,
     pub device: wgpu::Device,
     pub info: GpuInfo,
     pub geometry: GeometryArena,
@@ -206,6 +209,8 @@ pub struct Renderer {
     prev_palette_buffer: wgpu::Buffer,
     /// The next frame starts the motion history again (`cut_motion_history`).
     motion_cut: bool,
+    /// `shift_world`'s moves not yet sent with a frame.
+    world_shift: [f32; 2],
     /// Palette bytes written since the last frame (AURORA_PROFILE).
     palettes_uploaded: u64,
     /// Bytes of vertices deformed in place this frame (profile).
@@ -223,6 +228,7 @@ pub struct Renderer {
     vsync: bool,
     settings: RenderSettings,
     msaa_supported: Vec<u32>,
+    blend_exact_supported: bool,
     /// The surface can be read back (captures).
     can_capture: bool,
     output_format: wgpu::TextureFormat,
@@ -242,6 +248,8 @@ pub struct Renderer {
     /// The same for the faces drawn under a pixel (`request_drawn`).
     drawn_requests: Vec<crate::drawn_pick::DrawnRequest>,
     drawn_answers: Vec<crate::drawn_pick::DrawnAnswer>,
+    /// The poser's part pick read back last (`take_part_pick`).
+    part_pick: Option<(u32, [u32; 2])>,
     /// Frames handed over.
     frames: u64,
     /// The renderer's side of the last frame result, and whether it came
@@ -310,7 +318,13 @@ impl Renderer {
     /// the old window open behind a new one. The renderer's host keeps
     /// `window` instead, dropped after the backend, or kept by a render
     /// thread left behind in the driver (`render_thread::KeepAlive`).
-    pub fn new<W>(window: Arc<W>, width: u32, height: u32, vsync: bool, gpu: &str) -> Result<Renderer, RenderError>
+    ///
+    /// `xr`: open the GPU device through the VR runtime (OpenXR), which VR
+    /// needs from the start. Off, the runtime is never loaded: some load a
+    /// driver of their own that crashes the start on PCs that never use VR
+    /// (#2309: SteamVR's `vrclient` into AMD's `amdlvr64`). VR then asks
+    /// for a restart (`VrState::Unavailable`).
+    pub fn new<W>(window: Arc<W>, width: u32, height: u32, vsync: bool, gpu: &str, xr: bool) -> Result<Renderer, RenderError>
     where
         W: wgpu::rwh::HasWindowHandle + wgpu::rwh::HasDisplayHandle + Send + Sync + 'static,
     {
@@ -318,13 +332,37 @@ impl Renderer {
         let desc = || {
             let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
             desc.backends = crate::BACKENDS;
-            desc.flags = if std::env::var_os("AURORA_GPU_VALIDATION").is_some() {
-                wgpu::InstanceFlags::debugging()
-            } else {
-                wgpu::InstanceFlags::empty()
-            };
+            desc.flags = gpu_instance_flags(std::env::var_os("AURORA_GPU_VALIDATION").is_some());
             desc
         };
+        #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+        #[allow(unused_mut)] // reassigned only by the Windows AMD-layer fallback below
+        let mut xr_graphics = {
+            let demo_xr = std::env::var_os("AURORA_DEMO_XR_DEVICE").is_some() || std::env::var_os("AURORA_DEMO_XR_WORLD").is_some();
+            if !xr && !demo_xr {
+                log::info!("OpenXR not opened at start: VR is not set up at startup");
+                None
+            } else {
+                match crate::xr_device::Graphics::new(desc().flags) {
+                    Ok(graphics) => Some(graphics),
+                    Err(e) => {
+                        log::info!("OpenXR initialization unavailable: {e}");
+                        if demo_xr {
+                            return Err(RenderError::Device(e.to_string()));
+                        }
+                        None
+                    }
+                }
+            }
+        };
+        #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+        #[allow(unused_mut)] // reassigned only by the Windows enumeration retries below
+        let mut instance = xr_graphics
+            .as_ref()
+            .map_or_else(|| wgpu::Instance::new(desc()), |g| g.instance.clone());
+        #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+        let _ = xr; // no VR on the other systems
+        #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
         #[allow(unused_mut)] // reassigned only by the Windows enumeration retries below
         let mut instance = wgpu::Instance::new(desc());
         // ---- the GPU: every adapter listed, then tried in our order
@@ -377,8 +415,10 @@ impl Renderer {
                         log::warn!("GPU: no Vulkan adapter without Dozen (Vulkan on Direct3D 12): trying again with it");
                     }
                 }
-                // Every retry uses a fresh instance.
+                // Every retry uses a plain instance. OpenXR owns an instance
+                // and cannot later open an adapter from a different one.
                 drop(instance);
+                xr_graphics = None;
                 instance = wgpu::Instance::new(desc());
                 adapters = pollster::block_on(instance.enumerate_adapters(crate::BACKENDS));
                 if adapters.is_empty() {
@@ -463,6 +503,9 @@ impl Renderer {
         let mut opened = None;
         let mut failure = RenderError::NoAdapter("no native GPU adapter can present to the window".into());
         for (n, &i) in plan.order.iter().enumerate() {
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            let opened_device = open_device(&adapters[i], xr_graphics.as_ref());
+            #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
             let opened_device = open_device(&adapters[i]);
             match opened_device {
                 Ok(o) => {
@@ -582,8 +625,18 @@ impl Renderer {
         let palette_buffer = Self::make_palette_buffer(&device, 64 * 160);
         let prev_palette_buffer = device.create_buffer(&Self::prev_palette_desc(64 * 160));
         let skin_bind_buffer = Self::make_skin_bind_buffer(&device, 256);
-        // staging memory of the streamed uploads, created once here
-        let uploads = UploadQueue::new(&device, info.integrated || info.vram_mb.is_some_and(|mb| mb < 4096));
+        // staging memory of the streamed uploads, created once here: fewer
+        // chunks where the CPU can map little video memory (no Resizable
+        // BAR), which the large pool would fill alone (#2171)
+        let mappable_mb = crate::vram::mappable_mb(&adapter);
+        let pool_size = crate::upload::PoolSize::choose(info.integrated, info.vram_mb, mappable_mb);
+        let uploads = UploadQueue::sized(&device, pool_size);
+        log::info!(
+            "staging pool: {} MB in {} MB chunks (mappable video memory: {})",
+            uploads.pool().bytes() >> 20,
+            uploads.pool().max_region_bytes() >> 20,
+            mappable_mb.map_or_else(|| "none".to_owned(), |mb| format!("{mb} MB"))
+        );
         let gpu_cull = GpuCull::supported(&device);
         log::info!(
             "draw lists: {}",
@@ -598,6 +651,18 @@ impl Renderer {
         let pacing = std::env::var("AURORA_FRAME_PACING").ok();
         let gpu_frames = Arc::new(crate::pacing::GpuFrames::new(crate::pacing::wanted(pacing.as_deref())));
         let pace_gate = crate::pacing::Gate::new(crate::pacing::always(pacing.as_deref()));
+        #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+        let vr = Arc::new(crate::vr_control::Control::new(xr_graphics.is_some()));
+        #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+        let vr = Arc::new(crate::vr_control::Control::new(false));
+        #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+        if let Some((runtime, system)) = xr_graphics.as_ref().map(|g| g.binding()) {
+            vr.set_default_resolution(crate::xr_frame::default_resolution(
+                &runtime,
+                system,
+                device.limits().max_texture_dimension_2d,
+            ));
+        }
         // the compiled pipelines of the earlier starts (pipeline_cache.rs),
         // before the first one is made
         crate::pipeline_cache::open(&device, &ainfo);
@@ -610,12 +675,15 @@ impl Renderer {
         .filter(|_| !crate::device_lost::DEMO_HANG_TAKEN.swap(true, std::sync::atomic::Ordering::Relaxed))
         .map(|frame| (frame, queue.clone()));
         let backend = Backend::new(BackendInit {
+            vr: vr.clone(),
             gpu_frames: gpu_frames.clone(),
             device: device.clone(),
             queue,
             surface: Arc::new(surface),
             external: false,
             output_format: None,
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            xr: xr_graphics.as_ref().map(|g| g.binding()),
             adapter,
             width,
             height,
@@ -624,6 +692,8 @@ impl Renderer {
             adapter_specific,
             gpu_cull,
             tex_layout: textures.layout.clone(),
+            tex_layout_entries: textures.layout_entries.clone(),
+            instance_flags: desc().flags,
             scene: scene_gpu(
                 &records,
                 &cull,
@@ -638,6 +708,7 @@ impl Renderer {
             lost: lost.clone(),
         })?;
         let msaa_supported = backend.msaa_supported().to_vec();
+        let blend_exact_supported = backend.blend_exact_supported();
         let can_capture = backend.can_capture();
         let output_format = backend.output_format();
         let host = Host::new(
@@ -657,6 +728,9 @@ impl Renderer {
         crate::pipeline_cache::log_start();
         Ok(Renderer {
             host,
+            vr,
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            _xr_graphics: xr_graphics,
             device,
             info,
             geometry,
@@ -670,6 +744,7 @@ impl Renderer {
             palette_buffer,
             prev_palette_buffer,
             motion_cut: false,
+            world_shift: [0.0; 2],
             palettes_uploaded: 0,
             vertices_uploaded: 0,
             geometry_uploaded: 0,
@@ -680,6 +755,7 @@ impl Renderer {
             vsync,
             settings: RenderSettings::default(),
             msaa_supported,
+            blend_exact_supported,
             can_capture,
             output_format,
             anim_clock,
@@ -692,6 +768,7 @@ impl Renderer {
             pick_ticket: 0,
             drawn_requests: Vec::new(),
             drawn_answers: Vec::new(),
+            part_pick: None,
             frames: 0,
             last_stats: RenderStats::default(),
             fresh: false,
@@ -860,6 +937,17 @@ impl Renderer {
         self.motion_cut = true;
     }
 
+    /// Every position moved by `by` (a border crossing: they are relative
+    /// to the new region now). What the renderer keeps in world positions
+    /// from frame to frame (the wetness and snow memory, the footprints'
+    /// map) moves with them, so the crossing changes nothing on the ground:
+    /// left where it was, the memory read 256 m off, and all of it was new
+    /// to it (the snow and the wet ground started again, in a hard line).
+    pub fn shift_world(&mut self, by: Vec3) {
+        self.world_shift[0] += by.x;
+        self.world_shift[1] += by.y;
+    }
+
     /// Upload joint palettes (column-major matrices). Indices referenced by
     /// `DrawRecord::flags[1]` of skinned records.
     pub fn set_palettes(&mut self, mats: &[[[f32; 4]; 4]]) {
@@ -977,6 +1065,12 @@ impl Renderer {
         &self.msaa_supported
     }
 
+    /// Whether the device can draw the blended faces in the exact order of
+    /// their fragments (`RiggedBlendDepth::Exact`).
+    pub fn blend_exact_supported(&self) -> bool {
+        self.blend_exact_supported
+    }
+
     /// Frames are drawn by the render thread (false: AURORA_RENDER_THREAD=0).
     pub fn threaded(&self) -> bool {
         self.host.threaded()
@@ -1054,6 +1148,12 @@ impl Renderer {
         self.settings = s;
     }
 
+    /// Rain prototype: keep the G-buffer while it rains (pipelines and
+    /// targets follow with a later frame, as with any setting).
+    pub fn set_rain_surfaces(&mut self, on: bool) {
+        self.settings.rain_surfaces = on;
+    }
+
     pub fn set_vsync(&mut self, vsync: bool) {
         self.vsync = vsync;
     }
@@ -1066,6 +1166,13 @@ impl Renderer {
     /// reported it with the last frame it finished (None before the first).
     pub fn present_mode(&self) -> Option<wgpu::PresentMode> {
         self.last_stats.present_mode
+    }
+
+    /// Aurora Weather: snow lay on the ground in the last frame the backend
+    /// finished. The app's footprints and snow work wait for it, or for snow
+    /// falling.
+    pub fn snow_lying(&self) -> bool {
+        self.last_stats.snow_lying
     }
 
     /// The last frame the backend finished was drawn with the settings last
@@ -1181,6 +1288,9 @@ impl Renderer {
         }
         self.pick_answers.append(&mut r.picks);
         self.drawn_answers.append(&mut r.drawn);
+        if let Some(joint) = r.part_pick {
+            self.part_pick = Some(joint);
+        }
         // (the answer of a click given up while it was in flight is never
         // taken: the next ones push it out)
         const KEPT: usize = 16;
@@ -1232,6 +1342,35 @@ impl Renderer {
     /// returns at once, with the statistics of that frame before; without,
     /// the frame is drawn here. A frame that carries a capture is waited
     /// for: `captured` holds it when this returns.
+    pub fn vr_default_resolution(&self) -> Option<[u32; 2]> {
+        self.vr.default_resolution()
+    }
+
+    pub fn vr_state(&self) -> crate::VrState {
+        self.vr.state()
+    }
+    pub fn vr_engaged(&self) -> bool {
+        self.vr.state().engaged()
+    }
+    /// Latest coherent head pose; None on focus loss, stale tracking or contention.
+    pub fn vr_head_pose(&self) -> Option<crate::HeadPose> {
+        self.vr.head_pose()
+    }
+    /// The VR runtime announced it is closing (SteamVR quit by the user): VR
+    /// is over for this renderer. The device was opened through the runtime,
+    /// which ends the process a few seconds later unless this renderer is
+    /// dropped by then: the viewer replaces it with one opened without the
+    /// runtime (lifetech-viewer's `gpu_recovery.rs`).
+    pub fn vr_runtime_lost(&self) -> bool {
+        self.vr.runtime_lost()
+    }
+    pub fn vr_focused(&self) -> bool {
+        self.vr.focused()
+    }
+    pub fn set_vr_enabled(&self, on: bool) -> bool {
+        self.vr.request(on)
+    }
+
     pub fn render(&mut self, params: FrameParams, lists: &DrawLists, ui: Option<crate::EguiFrame>) -> RenderStats {
         self.render_output(params, lists, ui, None)
     }
@@ -1239,7 +1378,7 @@ impl Renderer {
     /// Draw a frame into a caller-owned texture instead of presenting the window.
     /// The target must belong to this renderer's device and match its output size
     /// and format. The texture stays alive until the render worker has submitted
-    /// the frame; this call alone is not a GPU completion fence.
+    /// the frame; this call alone is not a GPU completion or OpenXR release fence.
     /// No egui shapes are drawn. World draw lists, including HUDs, are supplied
     /// by the caller. Each independent view needs its own rendering history;
     /// alternating eyes through this renderer would mix temporal state.
@@ -1390,6 +1529,7 @@ impl Renderer {
             capture,
             histogram: self.histogram_request.take(),
             motion_cut: std::mem::take(&mut self.motion_cut),
+            world_shift: std::mem::take(&mut self.world_shift),
             input_at: self.input_at.take(),
         };
         self.frames += 1;
@@ -1466,6 +1606,7 @@ impl Renderer {
                 gpu_contact: self.last_stats.gpu_contact,
                 gpu_bloom: self.last_stats.gpu_bloom,
                 gpu_effects: self.last_stats.gpu_effects,
+                gpu_weather: self.last_stats.gpu_weather,
                 occluded: self.last_stats.occluded,
                 visible_objects: self.last_stats.visible_objects,
                 gpu_cull: self.last_stats.gpu_cull,
@@ -1628,6 +1769,15 @@ impl Renderer {
         Some(self.drawn_answers.swap_remove(i).1)
     }
 
+    /// The poser's part under the cursor read back since the last call
+    /// (part_pick.rs, asked with `FrameParams::part_pick`), with the window
+    /// pixel it was read at: 0 when nothing of the subject is there,
+    /// a part class otherwise.
+    pub fn take_part_pick(&mut self) -> Option<(u32, [u32; 2])> {
+        self.collect();
+        self.part_pick.take()
+    }
+
     /// Give up a [`Self::request_drawn`] nobody waits for any more.
     pub fn forget_drawn(&mut self, ticket: u64) {
         self.drawn_requests.retain(|(t, _, _, _)| *t != ticket);
@@ -1759,7 +1909,10 @@ const MEMORY_BLOCK: u64 = 16 << 20;
 
 /// Open `adapter` with the features the renderer needs and the optional
 /// ones it has; an error when it lacks a needed one or the device fails.
-fn open_device(adapter: &wgpu::Adapter) -> Result<OpenedDevice, RenderError> {
+fn open_device(
+    adapter: &wgpu::Adapter,
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))] xr: Option<&crate::xr_device::Graphics>,
+) -> Result<OpenedDevice, RenderError> {
     let afeat = adapter.features();
     let alim = adapter.limits();
     let bindless_feats =
@@ -1825,12 +1978,26 @@ fn open_device(adapter: &wgpu::Adapter) -> Result<OpenedDevice, RenderError> {
     if afeat.contains(wgpu::Features::TEXTURE_COMPRESSION_BC) {
         features |= wgpu::Features::TEXTURE_COMPRESSION_BC;
     }
+    // depth-based stochastic transparency (oit_stochastic.rs): the triangle
+    // in the seed of a fragment's mask
+    if afeat.contains(wgpu::Features::PRIMITIVE_INDEX) {
+        features |= wgpu::Features::PRIMITIVE_INDEX;
+    }
     // GPU draw lists (gpu_cull.rs): draw counts written by the GPU
     if afeat.contains(wgpu::Features::MULTI_DRAW_INDIRECT_COUNT) {
         features |= wgpu::Features::MULTI_DRAW_INDIRECT_COUNT;
     }
+    // The depth test before the fragment shader that files blended
+    // fragments (blend_exact.rs): only what shows is filed
+    features |= afeat & crate::blend_exact::EARLY_TEST;
+    // and their pass over the screen in one draw
+    features |= afeat & crate::blend_exact::TWO_SOURCES;
+    // and the places of their haze whole in its target
+    features |= afeat & crate::blend_exact::WIDE_RANGE;
     // Aurora's own pipeline cache on disk (pipeline_cache.rs)
     features |= crate::pipeline_cache::feature(afeat);
+    // naga's SampleMask built-in fixed on Vulkan (spirv_fix.rs)
+    features |= crate::spirv_fix::feature(afeat);
     let in_all_pools = descriptors_in_all_pools(adapter);
     let max_textures = texture_page_limit(&alim, in_all_pools);
     if max_textures < texture_page_limit(&alim, None) {
@@ -1857,6 +2024,15 @@ fn open_device(adapter: &wgpu::Adapter) -> Result<OpenedDevice, RenderError> {
         },
         trace: wgpu::Trace::Off,
     };
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    let (device, queue) = if let Some(xr) = xr {
+        let graphics = xr.open(adapter, &descriptor).map_err(|e| RenderError::Device(e.to_string()))?;
+        log::info!("OpenXR-compatible viewer graphics device: {}", adapter.get_info().name);
+        graphics
+    } else {
+        pollster::block_on(adapter.request_device(&descriptor)).map_err(|e| RenderError::Device(e.to_string()))?
+    };
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     let (device, queue) = pollster::block_on(adapter.request_device(&descriptor)).map_err(|e| RenderError::Device(e.to_string()))?;
     Ok(OpenedDevice {
         device,
@@ -2035,6 +2211,17 @@ fn texture_page_limit(limits: &wgpu::Limits, descriptors_in_all_pools: Option<u3
     }
 }
 
+fn gpu_instance_flags(validation: bool) -> wgpu::InstanceFlags {
+    if validation {
+        wgpu::InstanceFlags::debugging()
+    } else {
+        // No VALIDATION_INDIRECT_CALL: wgpu does not apply it to the GPU-culled
+        // scene's multi_draw_indexed_indirect_count (cull.wgsl clamps those
+        // ranges), and the CPU-built lists are range-checked when pushed.
+        wgpu::InstanceFlags::empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2073,6 +2260,13 @@ mod tests {
             description: "Validation Error\n\nCaused by:\n  In Queue::submit\n".to_owned(),
         };
         assert_eq!(error_text(&error), "Validation Error\n\nCaused by:\n  In Queue::submit\n");
+    }
+
+    #[test]
+    fn indirect_call_validation_is_left_to_debugging() {
+        assert!(!gpu_instance_flags(false).contains(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL));
+        assert!(!gpu_instance_flags(false).contains(wgpu::InstanceFlags::DEBUG));
+        assert!(gpu_instance_flags(true).contains(wgpu::InstanceFlags::DEBUG));
     }
 
     #[test]

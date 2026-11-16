@@ -20,6 +20,8 @@ fn line(from: &str, source: Uuid, kind: ChatKind, text: &str) -> ChatLine {
         kind,
         source,
         origin: Origin::Live,
+        blocked: false,
+        beyond_range: false,
     }
 }
 
@@ -115,6 +117,7 @@ impl Harness {
             settings: &mut radar_settings,
             voice: &voice,
             draw_distance: 64.0,
+            second_life: true,
             now: 0.0,
             pics: &pics,
         };
@@ -182,7 +185,8 @@ impl Harness {
         };
         self.frame(vec![egui::Event::PointerMoved(at)]);
         self.frame(vec![button(true)]);
-        for _ in 0..36 {
+        // past the hold that opens a sheet (`rows::SHEET_HOLD_SECONDS`)
+        for _ in 0..72 {
             self.frame(Vec::new());
         }
         self.frame(vec![button(false)]);
@@ -285,6 +289,66 @@ fn a_double_click_selects_one_word_of_a_line() {
     h.settle();
     let (start, end) = h.st.selection.1.bounds().expect("a word is selected");
     assert_eq!((start.seq, start.at, end.at), (end.seq, 6, 10), "\"from\" of \"hello from Jane\"");
+}
+
+#[test]
+fn clearing_the_message_filter_keeps_the_selected_text_and_its_message_in_view() {
+    for style in [ChatStyle::Aurora, ChatStyle::Legacy] {
+        for method in 0..3 {
+            let mut h = Harness::new(style);
+            for i in 0..150 {
+                let text = if i == 75 {
+                    "Needle".into()
+                } else {
+                    format!("Other message {i:03}")
+                };
+                h.world.conversation_line(JANE, line("Jane", JANE, ChatKind::Im, &text));
+            }
+            h.st.selected = Some(JANE);
+            h.st.searches.entry(Some(JANE)).or_default().filter = Some("Needle".into());
+            let texts = h.settle();
+            let at = last(&texts, "Needle").center();
+            for _ in 0..2 {
+                h.click(at);
+            }
+            let bounds = h.st.selection.1.bounds().expect("the message's word is selected");
+            let field = super::super::find::filter_id(Some(JANE));
+            let at = h.rect(if method == 0 { field.with("clear") } else { field }).center();
+            h.click(at);
+            if method != 0 {
+                let modifiers = egui::Modifiers {
+                    ctrl: true,
+                    command: true,
+                    ..Default::default()
+                };
+                h.frame(vec![
+                    egui::Event::Key {
+                        key: egui::Key::A,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    },
+                    egui::Event::Key {
+                        key: if method == 1 { egui::Key::Delete } else { egui::Key::Backspace },
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]);
+            }
+            assert_eq!(h.st.searches[&Some(JANE)].filter.as_deref(), Some(""));
+            for _ in 0..3 {
+                h.settle();
+            }
+            assert_eq!(h.st.selection.1.bounds(), Some(bounds), "{style:?}, method={method}");
+            let texts = h.settle();
+            let rect = last(&texts, "Needle");
+            assert!(rect.top() > 0.0 && rect.bottom() < 900.0, "{style:?}, method={method}: {rect:?}");
+            assert!(h.frames.ctx.memory(|m| m.has_focus(field)));
+        }
+    }
 }
 
 /// A drag on the head (not the title bar) leaves the window in place.
@@ -1180,8 +1244,11 @@ fn empty_sections_are_not_drawn() {
     let texts = h.settle();
     let head = |key: &'static str| lifetech_i18n::text(key).to_uppercase();
     assert!(texts.iter().any(|t| t.source == head("ui-chat-section-private")), "the IMs' head");
+    // (the window's title may read the same: Japanese writes 会話 for both)
+    let title = lifetech_i18n::tr!("common-conversations");
     for key in ["ui-chat-section-groups", "ui-chat-section-conferences"] {
-        assert!(texts.iter().all(|t| t.source != head(key)), "{key} drawn while empty");
+        let drawn = texts.iter().filter(|t| t.source == head(key)).count();
+        assert_eq!(drawn, usize::from(head(key) == title), "{key} drawn while empty");
     }
     let new = super::super::sidebar::control_id("new-conversation");
     assert!(h.frames.ctx.read_response(new).is_some(), "the new conversation button");
@@ -2017,6 +2084,7 @@ fn the_contacts_tab_shows_peoples_friends() {
         settings: &mut radar_settings,
         voice: &voice,
         draw_distance: 64.0,
+        second_life: true,
         now: 0.0,
         pics: &pics,
     };
@@ -2609,11 +2677,16 @@ fn the_column_previews_show_link_labels() {
         line("Jane", JANE, ChatKind::Im, &format!("ask secondlife:///app/agent/{lune}/about")),
     );
     let texts = h.settle();
-    // (a teleport link reads "Teleport to Pinede (1,2,3)", in the language)
+    // (a teleport link reads "Teleport to Pinede (1,2,3)", in the language's
+    // order: Japanese puts the place first)
     assert!(
-        texts
-            .iter()
-            .any(|t| t.source.contains(" · Nova : join Cercle des Brumes with Lune Étoilée at ") && t.source.ends_with(" Pinede (1,2,3)")),
+        texts.iter().any(|t| {
+            let (_, preview) = t
+                .source
+                .split_once(" · Nova : join Cercle des Brumes with Lune Étoilée at ")
+                .unwrap_or_default();
+            preview.contains("Pinede (1,2,3)")
+        }),
         "the nearby chat's entry: {:?}",
         texts.iter().map(|t| &t.source).collect::<Vec<_>>()
     );

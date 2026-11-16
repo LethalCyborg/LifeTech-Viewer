@@ -30,8 +30,10 @@
 pub mod cef_cache;
 pub mod entry;
 pub mod filter;
+pub mod first_click;
 mod interact;
 pub mod keys;
+pub mod nearby;
 pub mod openid;
 pub mod pack;
 pub mod pick;
@@ -43,7 +45,7 @@ use crate::scene::sync_sets::IndexSet;
 use crate::scene::textures::TextureStreamer;
 use crate::scene::{CullView, Scene};
 use crate::world::World;
-use entry::{MediaDataClient, MediaEntry, ObjectMediaData};
+use entry::{MINI_CONTROLS, MediaDataClient, MediaEntry, ObjectMediaData};
 use glam::{Mat4, Vec2, Vec3};
 use lifetech_llsd::{Llsd, Map};
 use lifetech_media::{BrowserSettings, MediaEvent, MediaPlugin, MediaStatus, Modifiers, MouseEvent, PluginPaths, Priority};
@@ -183,6 +185,9 @@ pub struct MediaImpl {
     /// Prim media: perms_interact lets us navigate the face to another page
     /// (LLVOVolume::hasMediaPermission); otherwise the page bounces back.
     may_navigate: bool,
+    /// Prim media: perms_control shows the media chrome
+    /// (LLPanelPrimMediaControls); the Legacy Viewer hides it without this.
+    pub may_control: bool,
 }
 
 impl MediaImpl {
@@ -226,6 +231,7 @@ impl MediaImpl {
             mouse_down: false,
             user_nav: false,
             may_navigate: true,
+            may_control: true,
         }
     }
 
@@ -350,10 +356,16 @@ pub struct MediaSettings {
     /// PermAllowScriptedMedia: let scripts start the parcel media.
     pub allow_scripted: bool,
     /// MediaFirstClickInteract: the first click already goes to the page
-    /// when the face allows it (first_click_interact).
+    /// when the face allows it (first_click_interact), for the kinds of
+    /// object of `first_click` (off: MEDIA_FIRST_CLICK_NONE).
     pub first_click_interact: bool,
+    pub first_click: first_click::FirstClick,
     /// MediaAutoPlayHuds: media on HUDs plays by itself.
     pub autoplay_huds: bool,
+    /// BrowserJavascriptEnabled: JavaScript in every built-in browser
+    /// (media, web browser, profiles, search), sent to each new page's
+    /// plugin as LLViewerMediaImpl::newSourceFromMediaType does.
+    pub javascript: bool,
     /// MediaEnableFilter: media and music ask before a site not in the
     /// account's list (on by default, as there).
     pub filter: bool,
@@ -382,7 +394,9 @@ impl Default for MediaSettings {
             max_instances: 8,
             allow_scripted: false,
             first_click_interact: true,
+            first_click: first_click::FirstClick::default(),
             autoplay_huds: true,
+            javascript: true,
             filter: true,
             filter_trust_own_worn: true,
             filter_explained: false,
@@ -541,8 +555,8 @@ pub fn browser_cache(cache_dir: &std::path::Path) -> std::path::PathBuf {
 }
 
 /// Settings of our CEF browsers (newSourceFromMediaType): cache, log,
-/// language and the viewer's user agent.
-pub fn browser_settings(cache_dir: &std::path::Path, language: &str) -> BrowserSettings {
+/// language, the viewer's user agent and JavaScript.
+pub fn browser_settings(cache_dir: &std::path::Path, language: &str, media: &MediaSettings) -> BrowserSettings {
     BrowserSettings {
         // the system's own separator, as the plugin appends `cef_cache`
         // (LLPluginClassMedia::init gets getCacheDir + getDirDelimiter): a
@@ -553,7 +567,7 @@ pub fn browser_settings(cache_dir: &std::path::Path, language: &str) -> BrowserS
         language: language.to_string(),
         user_agent: user_agent(),
         cookies_enabled: true,
-        javascript_enabled: true,
+        javascript_enabled: media.javascript,
         zoom_factor: 1.0,
     }
 }
@@ -612,7 +626,13 @@ mod cache_tests {
     #[test]
     fn the_plugin_cache_lands_inside_cef() {
         let dir = std::env::temp_dir().join("aurora-cef-path");
-        let s = browser_settings(&dir, "en");
+        let s = browser_settings(&dir, "en", &MediaSettings::default());
+        assert!(s.javascript_enabled, "BrowserJavascriptEnabled is on by default");
+        let off = MediaSettings {
+            javascript: false,
+            ..MediaSettings::default()
+        };
+        assert!(!browser_settings(&dir, "en", &off).javascript_enabled);
         // what MediaPluginCEF builds from it
         assert_eq!(Path::new(&format!("{}cef_cache", s.cache_path)), dir.join("cef").join("cef_cache"));
     }
@@ -817,6 +837,11 @@ impl MediaManager {
 
     /// Offline demo: media on a face without the capability, autoplaying.
     pub fn demo_entry(&mut self, object: Uuid, face: u8, url: &str) {
+        self.demo_face(object, face, url, false);
+    }
+
+    /// `mini` is `PRIM_MEDIA_CONTROLS_MINI` (`AURORA_DEMO_MEDIA=mini`).
+    pub fn demo_face(&mut self, object: Uuid, face: u8, url: &str, mini: bool) {
         let entry = MediaEntry {
             current_url: url.to_string(),
             home_url: url.to_string(),
@@ -824,6 +849,7 @@ impl MediaManager {
             first_click_interact: true,
             width_pixels: 1024,
             height_pixels: 576,
+            controls: if mini { MINI_CONTROLS } else { 0 },
             ..Default::default()
         };
         let mut faces = vec![None; face as usize + 1];
