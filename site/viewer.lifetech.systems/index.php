@@ -168,6 +168,36 @@ $builds = ltv_builds();
           <h3>Open and honest</h3>
           <p>Free software under the GNU GPL v3. Every line of code is public, and bug reports go straight to the project.</p>
         </div>
+        <div class="tile">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M8 13h8"/></svg>
+          <h3>Type to find in your inventory</h3>
+          <p>Open your inventory and type a few letters: it jumps straight to the folder or item that starts with them. Type the letter again for the next one.</p>
+        </div>
+        <div class="tile">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 10h8"/></svg>
+          <h3>Know who is talking</h3>
+          <p>When a display name differs from the username, chats show both, the username in brackets: you always know who you are talking to.</p>
+        </div>
+        <div class="tile">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h1M11 10h2M16 10h1M8 14h8"/></svg>
+          <h3>Familiar keys</h3>
+          <p>Alt with W, A, S, D moves the camera around you, and Ctrl+W closes the window you just opened, as in the viewer you may know.</p>
+        </div>
+        <div class="tile">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 15a4 4 0 1 1 1-7.9A5 5 0 0 1 17.6 9 3.5 3.5 0 0 1 17 16H7z"/><path d="M9 19l-1 2M13 19l-1 2M17 19l-1 2"/></svg>
+          <h3>LifeTech Weather</h3>
+          <p>Rain, snow that settles, wind, thunder and northern lights, drawn for you alone or set by the region you visit.</p>
+        </div>
+        <div class="tile">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="3"/><path d="M6 21v-2a6 6 0 0 1 12 0v2"/></svg>
+          <h3>Avatar Studio</h3>
+          <p>A calm view to dress and pose your avatar, with outfit portraits, a poser and an animation editor.</p>
+        </div>
+        <div class="tile">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="13" height="10" rx="2"/><path d="M16 11l5-3v8l-5-3"/></svg>
+          <h3>Photos and film</h3>
+          <p>The Director films along a camera track you set, and built-in colour looks give your photos a finished style.</p>
+        </div>
       </div>
     </div>
   </section>
