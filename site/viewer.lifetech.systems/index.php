@@ -15,6 +15,7 @@ function ltv_builds(): array
 {
     $platforms = [
         'windows-x64-setup' => ['exe', 'Windows', 'Installer · 64-bit, Windows 10 and 11'],
+        'windows-x64' => ['zip', 'Windows', 'Zip archive · 64-bit, Windows 10 and 11'],
         'macos-arm64' => ['dmg', 'macOS', 'Apple Silicon (M1 or later)'],
         'linux-x64' => ['tar.gz', 'Linux', '64-bit, recent distributions'],
     ];
@@ -43,7 +44,14 @@ function ltv_builds(): array
             'sha256' => strtok((string) file_get_contents("$best.sha256"), " \t\n") ?: '',
         ];
     }
-    return $out;
+    // Windows: the installer, or the zip when it is the newer version (an
+    // installer is not built for every version).
+    $windows = array_keys(array_filter($out, fn($b) => $b['system'] === 'Windows'));
+    if (count($windows) === 2) {
+        [$setup, $zip] = $windows;
+        unset($out[version_compare($out[$zip]['version'], $out[$setup]['version'], '>') ? $setup : $zip]);
+    }
+    return array_values($out);
 }
 $builds = ltv_builds();
 ?><!doctype html>
@@ -183,7 +191,7 @@ $builds = ltv_builds();
         </div>
 <?php endforeach; ?>
       </div>
-      <p class="note">macOS: the first time, right-click LifeTech Viewer in Applications and choose <b>Open</b> (or System Settings › Privacy &amp; Security › <b>Open Anyway</b>). Linux: unpack the archive and start <code>lifetech-viewer</code>. Windows: run the installer; if SmartScreen asks, choose <b>More info</b> › <b>Run anyway</b>.</p>
+      <p class="note">macOS: the first time, right-click LifeTech Viewer in Applications and choose <b>Open</b> (or System Settings › Privacy &amp; Security › <b>Open Anyway</b>). Linux: unpack the archive and start <code>lifetech-viewer</code>. Windows: run the installer, or unpack the zip and start <code>lifetech-viewer.exe</code>; if SmartScreen asks, choose <b>More info</b> › <b>Run anyway</b>.</p>
 <?php endif; ?>
       <div class="download">
         <div class="card">
