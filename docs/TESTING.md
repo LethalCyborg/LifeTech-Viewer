@@ -10965,11 +10965,12 @@ separate searches enabled and disabled; that preference controls only the text.
   closes), then Right at 700 (it opens again). Capture at 690 (the folder
   closed and selected) and 720 (open). The log reports the selection and
   the folder's state at both points.
-- `keyboard-type`, `aurora-keyboard-type`: type C at frames 665 and 680
-  into the window just opened, with nothing clicked: the first row whose
-  name starts with C is selected, then the next one, and the search field
-  stays empty. Capture at 675 and 690. The log reports the search and the
-  selection at both points.
+- `keyboard-type`, `aurora-keyboard-type`, `aurora-keyboard-type-wide`
+  (the explorer): type C at frames 665 and 680 into the window just
+  opened, with nothing clicked: the first row whose name starts with C is
+  selected, then the next one, and the search field stays empty. Down at
+  frame 695 selects the row below, Home at 710 the first row. The log
+  reports the search and the selection at frames 675, 690, 705 and 720.
 - `clipboard`: expanded inventory to test Ctrl+C / Ctrl+X / Ctrl+V on
   items, folders and multiple selections. Choose the destination
   folder (or one of its items) before pasting. The search and

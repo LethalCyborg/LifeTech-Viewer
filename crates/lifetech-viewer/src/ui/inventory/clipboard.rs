@@ -506,8 +506,10 @@ pub fn demo_events(ctx: &egui::Context, frame: u64, st: &mut InventoryUi) -> Vec
     };
     // Letters typed into the window just opened, nothing clicked first:
     // C selects the first row starting with C, C again the next one.
-    if mode == "keyboard-type" {
-        if matches!(frame, 675 | 690) {
+    // "-wide": the same in the explorer (aurora-keyboard-type-wide), then
+    // Down and Home move the selection
+    if mode.starts_with("keyboard-type") {
+        if matches!(frame, 675 | 690 | 705 | 720) {
             log::info!(
                 "demo inventory type-ahead: frame={frame}, search={:?}, selected={:?}, visible={}",
                 st.search,
@@ -515,8 +517,19 @@ pub fn demo_events(ctx: &egui::Context, frame: u64, st: &mut InventoryUi) -> Vec
                 st.selected.is_some_and(|id| st.visible.contains(&id))
             );
         }
+        let key = |key| {
+            vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
         return match frame {
             665 | 680 => vec![egui::Event::Text("c".into())],
+            695 => key(egui::Key::ArrowDown),
+            710 => key(egui::Key::Home),
             _ => Vec::new(),
         };
     }

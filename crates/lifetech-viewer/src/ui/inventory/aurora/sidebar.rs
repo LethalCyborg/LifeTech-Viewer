@@ -188,6 +188,9 @@ fn browse(st: &mut InventoryUi, prefs: &InventoryPreferences, folder: Uuid) {
     st.browse = folder;
     // A pointer selection is already in sight, even if its row is partly clipped.
     st.side.shown = folder;
+    // LifeTech: the list takes the keyboard back, so letters, the arrows and
+    // Home go on working after a click in this column
+    st.focus_list = true;
 }
 
 /// The account's saved smart searches: a click shows one over the whole

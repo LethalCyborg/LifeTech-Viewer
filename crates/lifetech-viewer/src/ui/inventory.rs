@@ -511,8 +511,9 @@ pub struct InventoryUi {
     /// Save live splitter changes once the pointer is released.
     pub preferences_dirty: bool,
     was_open: bool,
-    /// Give the list the keyboard when the window opens: typed letters
-    /// then jump to rows (keyboard::type_ahead) rather than searching.
+    /// Give the list the keyboard on the next frame: when the window opens
+    /// and after a folder is chosen in the explorer's column, so that typed
+    /// letters jump to rows (keyboard::type_ahead) rather than searching.
     focus_list: bool,
     /// A request to give the search field the keyboard on the next frame
     /// (never on open: the list takes it then, for type-ahead).

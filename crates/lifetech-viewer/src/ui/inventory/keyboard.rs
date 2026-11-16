@@ -5,6 +5,10 @@
 //! closed folder selects the parent row (a second Left then closes it).
 //! Typed letters jump to the next row whose name starts with them
 //! (LLFolderView::handleUnicodeCharHere's type-ahead), not to the search.
+//! LifeTech: Home and End select the first and last row, Page Up and Page
+//! Down a page of rows away (the Legacy Viewer only scrolls there), Shift
+//! extending the selection; with nothing selected, Down starts at the first
+//! row and Up at the last.
 
 use super::*;
 
@@ -49,6 +53,10 @@ pub(super) fn navigate(ui: &egui::Ui, inv: &Inventory, st: &mut InventoryUi, fil
                     egui::Key::ArrowDown => Arrow::Down,
                     egui::Key::ArrowLeft if !explorer => Arrow::Left,
                     egui::Key::ArrowRight if !explorer => Arrow::Right,
+                    egui::Key::Home => Arrow::Home,
+                    egui::Key::End => Arrow::End,
+                    egui::Key::PageUp => Arrow::PageUp,
+                    egui::Key::PageDown => Arrow::PageDown,
                     _ => return true,
                 };
                 keys.push((arrow, modifiers.shift));
@@ -59,11 +67,13 @@ pub(super) fn navigate(ui: &egui::Ui, inv: &Inventory, st: &mut InventoryUi, fil
         });
     });
     let jumped = !typed.is_empty() && type_ahead(inv, st, filtered, &typed, now);
+    let page = (ui.available_height() / super::rows::row_height(st)).floor().max(1.0) as usize;
     let navigated = !keys.is_empty() || jumped;
     for (arrow, shift) in keys {
         match arrow {
             Arrow::Up | Arrow::Down => step(inv, st, filtered, arrow == Arrow::Down, shift),
             Arrow::Left | Arrow::Right => fold(inv, st, filtered, arrow == Arrow::Right),
+            Arrow::Home | Arrow::End | Arrow::PageUp | Arrow::PageDown => jump(st, filtered, arrow, page, shift),
         }
     }
     navigated || selected_after_delete
@@ -216,6 +226,50 @@ enum Arrow {
     Down,
     Left,
     Right,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+}
+
+/// The row Home, End, Page Up or Page Down goes to from row `from` (none
+/// selected: the top) in a list of `len` rows, `page` rows a page.
+fn jump_target(arrow: Arrow, from: Option<usize>, len: usize, page: usize) -> Option<usize> {
+    let last = len.checked_sub(1)?;
+    Some(match arrow {
+        Arrow::Home => 0,
+        Arrow::End => last,
+        Arrow::PageUp => from.unwrap_or(0).saturating_sub(page),
+        Arrow::PageDown => from.map_or(0, |at| (at + page).min(last)),
+        _ => return None,
+    })
+}
+
+/// LifeTech: Home, End, Page Up and Page Down select a row away; Shift
+/// selects every row between the anchor and it.
+fn jump(st: &mut InventoryUi, filtered: bool, arrow: Arrow, page: usize, shift: bool) {
+    let order = if filtered { &st.result_tree.order } else { &st.plain.order };
+    let current = st.selected.filter(|id| st.selection.contains(id));
+    let from = current.and_then(|id| order.iter().position(|row| *row == id));
+    let Some(to) = jump_target(arrow, from, order.len(), page) else {
+        return;
+    };
+    let target = order[to];
+    let anchor = st
+        .anchor
+        .filter(|_| shift)
+        .and_then(|id| order.iter().position(|row| *row == id).map(|at| (id, at)));
+    if let Some((anchor, at)) = anchor {
+        let range: HashSet<Uuid> = order[at.min(to)..=at.max(to)].iter().copied().collect();
+        st.selection = range;
+        st.anchor = Some(anchor);
+    } else {
+        st.selection.clear();
+        st.selection.insert(target);
+        st.anchor = Some(target);
+    }
+    st.selected = Some(target);
+    st.keyboard_selection = true;
 }
 
 /// KEY_RIGHT / KEY_LEFT of LLFolderView::handleKeyHere, on the current row
@@ -265,6 +319,15 @@ pub(super) fn scroll_offset(st: &InventoryUi, index: usize, row_height: f32, pit
 fn step(inv: &Inventory, st: &mut InventoryUi, filtered: bool, down: bool, shift: bool) {
     let order = if filtered { &st.result_tree.order } else { &st.plain.order };
     let Some(current) = st.selected.filter(|id| st.selection.contains(id)) else {
+        // LifeTech: nothing selected, Down starts at the first row and Up at
+        // the last, so the keys work before any click (Shift still waits for
+        // a row to start from)
+        if !shift && let Some(&row) = if down { order.first() } else { order.last() } {
+            st.selection = HashSet::from([row]);
+            st.anchor = Some(row);
+            st.selected = Some(row);
+            st.keyboard_selection = true;
+        }
         return;
     };
     let Some(index) = order.iter().position(|id| *id == current) else {
@@ -305,6 +368,33 @@ fn step(inv: &Inventory, st: &mut InventoryUi, filtered: bool, down: bool, shift
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn home_end_and_page_keys_go_to_their_rows() {
+        assert_eq!(jump_target(Arrow::Home, Some(5), 10, 3), Some(0));
+        assert_eq!(jump_target(Arrow::End, Some(5), 10, 3), Some(9));
+        assert_eq!(jump_target(Arrow::PageUp, Some(5), 10, 3), Some(2));
+        assert_eq!(jump_target(Arrow::PageUp, Some(1), 10, 3), Some(0));
+        assert_eq!(jump_target(Arrow::PageDown, Some(5), 10, 3), Some(8));
+        assert_eq!(jump_target(Arrow::PageDown, Some(8), 10, 3), Some(9));
+        assert_eq!(jump_target(Arrow::PageDown, None, 10, 3), Some(0), "nothing selected: the top");
+        assert_eq!(jump_target(Arrow::Home, None, 0, 3), None, "an empty list");
+        let id = Uuid::from_u128;
+        let mut st = InventoryUi::default();
+        st.plain.order = (1..=6).map(id).collect();
+        st.selected = Some(id(3));
+        st.selection = HashSet::from([id(3)]);
+        st.anchor = Some(id(3));
+        jump(&mut st, false, Arrow::End, 2, true);
+        assert_eq!(st.selected, Some(id(6)));
+        assert_eq!(
+            st.selection,
+            (3..=6).map(id).collect::<HashSet<_>>(),
+            "Shift+End selects down to the last row"
+        );
+        jump(&mut st, false, Arrow::Home, 2, false);
+        assert_eq!((st.selected, st.selection.len()), (Some(id(1)), 1));
+    }
 
     #[test]
     fn shift_skips_descendants_and_stops_at_sibling_boundaries() {
