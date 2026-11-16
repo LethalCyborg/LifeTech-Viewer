@@ -1322,6 +1322,7 @@ notecard-save-button = 保存（Ctrl＋S）
 notecard-view-classic = クラシック
 notecard-view-markdown = Markdown
 notecard-view-source = 編集
+notecard-find-match-case = 大文字と小文字を区別
 notecard-source-heading = プレーンテキスト
 notecard-preview-heading = Markdownプレビュー
 notecard-format-bold = ボールド

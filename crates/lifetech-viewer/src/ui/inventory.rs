@@ -52,6 +52,8 @@ pub(crate) mod listings;
 mod markdown;
 pub use markdown::View as NotecardView;
 mod move_to;
+/// LifeTech: find and replace in a notecard.
+mod note_find;
 pub use document::document_demo_events;
 pub(crate) mod permissions;
 mod progress;
@@ -627,6 +629,8 @@ pub struct InventoryUi {
     pub preview_source: Option<lifetech_net::inventory::notecard::Notecard>,
     /// Seeded from the shared preference on first display, then kept per window.
     pub notecard_view: Option<NotecardView>,
+    /// LifeTech: the notecard window's find and replace bar.
+    note_find: note_find::NoteFind,
     notecard_markdown: markdown::Cache,
     pub attachment_preview: Option<lifetech_net::inventory::InvItem>,
     pub preview_original: String,

@@ -11095,6 +11095,11 @@ separate searches enabled and disabled; that preference controls only the text.
   text at frame 650 then send Ctrl+S at frame 670; the refusal keeps
   the draft. Saving and closing / reopening keeps the text during
   the demo session, without creating an item in the personal inventory.
+- `note-find`, `note-find-markdown`, `note-find-edit`: the same sample in
+  Classic, Markdown and Edit; Ctrl+F opens the find bar (frame 650), "the"
+  is typed, Enter finds it and F3 the next one (the match selected in the
+  shown text, logged at frame 690), then Replace all makes both "THE"
+  (frame 700, logged). Capture at frame 692 to see the selected match.
 - `note-classic`, `note-markdown`, `note-source`: the same Markdown sample
   with an image, a landmark and an object in each display mode. Capture
   after frame 740. Switch tabs, edit the source in Classic or Edit, then

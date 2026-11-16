@@ -578,7 +578,8 @@ pub fn target(view: &str, inv: &Inventory) -> Option<Uuid> {
         "note" | "note-open" | "note-edit" | "note-save" | "note-close" | "note-error" | "note-readonly" | "note-embedded" | "note-new"
         | "note-task" | "note-task-save" | "note-task-error" | "note-task-readonly" | "note-drop" | "note-image" | "note-landmark"
         | "note-copy" | "note-task-embedded" | "note-menu-right" | "note-markdown" | "note-source" | "note-classic" | "note-format"
-        | "note-remember" | "note-lsl" | "note-lsl-markdown" | "note-rez" | "task-preview" => 8103,
+        | "note-remember" | "note-lsl" | "note-lsl-markdown" | "note-rez" | "note-find" | "note-find-markdown" | "note-find-edit"
+        | "task-preview" => 8103,
         "nocopy" => 8109,
         "notransfer" => 8110,
         "link" => 8113,
@@ -639,7 +640,16 @@ pub fn note_asset(embedded: bool) -> Vec<u8> {
     let markdown = std::env::var("AURORA_DEMO_INVENTORY").is_ok_and(|mode| {
         matches!(
             mode.as_str(),
-            "note-markdown" | "note-source" | "note-classic" | "note-format" | "note-remember" | "note-lsl" | "note-lsl-markdown"
+            "note-markdown"
+                | "note-source"
+                | "note-classic"
+                | "note-format"
+                | "note-remember"
+                | "note-lsl"
+                | "note-lsl-markdown"
+                | "note-find"
+                | "note-find-markdown"
+                | "note-find-edit"
         )
     });
     let lsl = std::env::var("AURORA_DEMO_INVENTORY").is_ok_and(|mode| matches!(mode.as_str(), "note-lsl" | "note-lsl-markdown"));

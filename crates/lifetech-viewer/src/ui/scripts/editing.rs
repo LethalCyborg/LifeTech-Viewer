@@ -302,13 +302,13 @@ pub(super) fn keyboard(ui: &mut egui::Ui, id: Id, source: &mut String, scope: &d
     changed
 }
 
-pub(super) fn cursor(ctx: &egui::Context, id: Id) -> CCursorRange {
+pub(crate) fn cursor(ctx: &egui::Context, id: Id) -> CCursorRange {
     egui::TextEdit::load_state(ctx, id)
         .and_then(|s| s.cursor.char_range())
         .unwrap_or_default()
 }
 
-pub(super) fn select(ctx: &egui::Context, id: Id, range: Range<usize>, focus: bool) {
+pub(crate) fn select(ctx: &egui::Context, id: Id, range: Range<usize>, focus: bool) {
     let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
     state
         .cursor
@@ -319,7 +319,7 @@ pub(super) fn select(ctx: &egui::Context, id: Id, range: Range<usize>, focus: bo
     }
 }
 
-pub(super) fn bytes(source: &str, range: CCursorRange) -> Range<usize> {
+pub(crate) fn bytes(source: &str, range: CCursorRange) -> Range<usize> {
     let [start, end] = range.sorted_cursors();
     source.byte_index_from_char_index(start.index).0..source.byte_index_from_char_index(end.index).0
 }
@@ -330,6 +330,14 @@ pub(super) fn replace(ctx: &egui::Context, id: Id, source: &mut String, range: R
     if source.len() - (end - start) + text.len() > lifetech_net::scripts::MAX_SOURCE {
         return false;
     }
+    replace_any(ctx, id, source, range, text);
+    true
+}
+
+/// [`replace`] with no size limit: the caller checks its own (a notecard's).
+pub(crate) fn replace_any(ctx: &egui::Context, id: Id, source: &mut String, range: Range<usize>, text: &str) {
+    let start = source.byte_index_from_char_index(CharIndex(range.start)).0;
+    let end = source.byte_index_from_char_index(CharIndex(range.end)).0;
     let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
     let mut undo = state.undoer();
     undo.add_undo(&(cursor(ctx, id), source.clone()));
@@ -340,7 +348,6 @@ pub(super) fn replace(ctx: &egui::Context, id: Id, source: &mut String, range: R
     state.set_undoer(undo);
     state.store(ctx, id);
     ctx.data_mut(|d| d.insert_temp(Id::unique((id, "history_dirty")), true));
-    true
 }
 
 pub(super) fn undo(ctx: &egui::Context, id: Id, source: &mut String, redo: bool) {
@@ -402,7 +409,7 @@ pub(super) fn word(source: &str, at: usize, lua: bool) -> &str {
 }
 
 /// Unicode lowercase may change byte length: keep original character ranges.
-pub(super) fn matches(source: &str, needle: &str, insensitive: bool) -> Vec<Range<usize>> {
+pub(crate) fn matches(source: &str, needle: &str, insensitive: bool) -> Vec<Range<usize>> {
     if needle.is_empty() {
         return Vec::new();
     }
@@ -438,7 +445,7 @@ pub(super) fn matches(source: &str, needle: &str, insensitive: bool) -> Vec<Rang
         .collect()
 }
 
-pub(super) fn next_match(ranges: &[Range<usize>], selection: Range<usize>, up: bool) -> Option<Range<usize>> {
+pub(crate) fn next_match(ranges: &[Range<usize>], selection: Range<usize>, up: bool) -> Option<Range<usize>> {
     if up {
         ranges
             .iter()

@@ -16,12 +16,21 @@ pub fn document_demo_events(ctx: &egui::Context, frame: u64, st: &mut InventoryU
     };
     if matches!(
         mode.as_str(),
-        "note-markdown" | "note-source" | "note-classic" | "note-format" | "note-remember" | "note-lsl" | "note-lsl-markdown"
+        "note-markdown"
+            | "note-source"
+            | "note-classic"
+            | "note-format"
+            | "note-remember"
+            | "note-lsl"
+            | "note-lsl-markdown"
+            | "note-find"
+            | "note-find-markdown"
+            | "note-find-edit"
     ) {
         if frame < 600 && mode != "note-remember" {
             st.notecard_view = Some(match mode.as_str() {
-                "note-markdown" | "note-lsl-markdown" => super::markdown::View::Markdown,
-                "note-source" | "note-format" | "note-lsl" => super::markdown::View::Edit,
+                "note-markdown" | "note-lsl-markdown" | "note-find-markdown" => super::markdown::View::Markdown,
+                "note-source" | "note-format" | "note-lsl" | "note-find-edit" => super::markdown::View::Edit,
                 _ => super::markdown::View::Classic,
             });
         }
@@ -33,6 +42,57 @@ pub fn document_demo_events(ctx: &egui::Context, frame: u64, st: &mut InventoryU
                 egui::Order::Middle,
                 egui::Id::unique(preview_window_id(st.ui_id, item, 7)),
             ));
+        }
+        // LifeTech: Ctrl+F in the classic view opens the find bar, a typed
+        // word is found, then Replace all (note_find.rs)
+        if mode.starts_with("note-find")
+            && let Some(item) = st.preview
+        {
+            let id = egui::Id::unique(("inventory_document_text", st.ui_id, item));
+            let shown = if mode == "note-find-markdown" { id.with("markdown") } else { id };
+            match frame {
+                640 => ctx.memory_mut(|memory| memory.request_focus(shown)),
+                650 => {
+                    return vec![egui::Event::Key {
+                        key: egui::Key::F,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::COMMAND,
+                    }];
+                }
+                660 => return vec![egui::Event::Text("the".into())],
+                // Enter in the search field, then F3 from the text
+                675 | 685 => {
+                    return vec![egui::Event::Key {
+                        key: if frame == 675 { egui::Key::Enter } else { egui::Key::F3 },
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }];
+                }
+                690 => {
+                    let selection = egui::TextEdit::load_state(ctx, shown).and_then(|s| s.cursor.char_range()).map(|r| {
+                        let [a, b] = r.sorted_cursors();
+                        a.index.0..b.index.0
+                    });
+                    log::info!("demo note find: {mode}, selected in the shown text={selection:?}");
+                }
+                670 => log::info!(
+                    "demo note find: open={}, query focused={}",
+                    st.note_find.open,
+                    st.note_find.query_focused(ctx, id)
+                ),
+                700 => {
+                    if let Some(Ok(text)) = &mut st.preview_text {
+                        let changed = st.note_find.demo_replace_all(ctx, id, text, "the", "THE");
+                        log::info!("demo note find: replaced={changed}, THE count={}", text.matches("THE").count());
+                    }
+                }
+                _ => {}
+            }
+            return Vec::new();
         }
         if mode == "note-format"
             && let Some(item) = st.preview

@@ -681,7 +681,33 @@ pub(super) fn preview(
             if it.asset_type == 7 {
                 notecard_description(ui, inv, st, it, actions);
             }
-            if it.asset_type == 7 && view.choose(ui, p) {
+            let mut chosen = false;
+            if it.asset_type == 7 {
+                let editor = egui::Id::unique(("inventory_document_text", st.ui_id, id));
+                let mut find = false;
+                ui.horizontal(|ui| {
+                    chosen = view.choose(ui, p);
+                    find = crate::ui::widgets::icon_button(ui, p, "search-filled", lifetech_i18n::tr!("script-search-title"), true);
+                });
+                // LifeTech: find and replace in the notecard's text, in the
+                // three views (note_find.rs); the Markdown view searches the
+                // rendered text
+                if let Some(Ok(text)) = &mut st.preview_text {
+                    let rendered = (view == super::markdown::View::Markdown)
+                        .then(|| st.notecard_markdown.get(ui.ctx(), text))
+                        .flatten();
+                    let preview = rendered.as_ref().map(|r| r.text.as_str());
+                    if find {
+                        st.note_find.begin(ui.ctx(), editor, text, preview);
+                    }
+                    st.note_find.shortcut(ui, editor, text, preview);
+                    let editable = editable && !st.save_pending && !matches!(st.dialog, Some(EditDialog::Discard(_)));
+                    if st.note_find.bar(ui, p, editor, text, preview, editable) {
+                        st.document_changed();
+                    }
+                }
+            }
+            if chosen {
                 st.notecard_view = Some(view);
                 prefs.notecard_view = view;
                 let editor = egui::Id::unique(("inventory_document_text", st.ui_id, id));

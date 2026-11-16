@@ -1334,6 +1334,7 @@ notecard-save-button = Enregistrer (Ctrl+S)
 notecard-view-classic = Classique
 notecard-view-markdown = Markdown
 notecard-view-source = Éditer
+notecard-find-match-case = Respecter la casse
 notecard-source-heading = Texte brut
 notecard-preview-heading = Aperçu Markdown
 notecard-format-bold = Gras
