@@ -5,6 +5,55 @@ What LifeTech Viewer changes compared with
 it is based on, version by version. Aurora's own improvements come in as
 they are released (see "Aurora Viewer updates" in each version).
 
+## 1.3.0 — 2026-11-17
+
+### Aurora Viewer updates
+Aurora's work up to 16 November 2026: about 110 new features and 150
+fixes. Among them:
+
+- **LifeTech Weather**: rain, snow that settles, wind, thunder and
+  northern lights, drawn for you only or set by the region.
+- **The Director**: a camera track and a recorder to film with.
+- **Avatar Studio**: a focused view to edit your avatar, with an animation
+  editor and a compact poser; move several poser joints together.
+- **Outfits**: a gallery showcase in Appearance, with automatic portraits.
+- **Chat**: the Omnifilter, conversation options (sort tabs by type,
+  "(You)", system messages in brackets, moderator styles), ((OOC))
+  brackets closed for you, nearby chat from beyond chat range dimmed,
+  blocked residents' chat hidden or greyed.
+- **People**: type-ahead in the friend lists, radar marks with your own
+  colour, a region badge, ban or unban someone from all your groups.
+- **Building**: an SLua editor, save objects as Collada or OBJ, beacons,
+  Build › Options, "Select faces with this texture".
+- **Camera and avatar**: camera roll shortcuts, Look at Last Chatter
+  (Ctrl+\), face the nearest avatar and the Compass, Animation Speed menu,
+  draw distance up to 1024 m.
+- **And more**: a startup splash, script recovery after a crash, cancel a
+  teleport in progress, the Milky Way from real star data, more photo LUTs
+  built in, god mode for OpenSim grids.
+
+### Kept from LifeTech
+Everything LifeTech added stays as it was: Choose your look, the Build
+Chest, the parcel badge, the Alt camera keys, Ctrl+W, usernames in
+brackets and inventory type-ahead. LifeTech still has no VR.
+
+## 1.2.0 — 2026-11-16
+
+### Chat
+- **Usernames in brackets**: when someone's display name differs from
+  their username, conversations show both, the username in brackets:
+  "Tess ✦ (tesstouch)". Everyone whose display name is their username
+  shows once, as before. In every chat style (Aurora, Compact, Bubbles and
+  Legacy), nearby chat, group chats and IMs alike.
+
+### Inventory
+- **Type to jump**: typing letters in the inventory selects the next
+  folder or item whose name starts with them, as in the Legacy Viewer.
+  Type the same letter again for the next match; after a one-second pause,
+  the next letter starts a new word. The list has the keyboard when the
+  inventory opens, so typing jumps instead of searching; click the search
+  field to search.
+
 ## 1.1.0 — 2026-11-11
 
 ### Camera and controls
