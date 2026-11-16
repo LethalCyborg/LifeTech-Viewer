@@ -397,7 +397,23 @@ pub fn show_real(
                     ui.label(RichText::new(failure_text(kind)).color(p.danger));
                 }
                 State::Rollback => {
-                    ui.label(RichText::new(lifetech_i18n::tr!("update-rollback")).color(p.danger));
+                    // an older helper does not say when it failed: the
+                    // message of a failed start, as before
+                    let installing = updater.rollback_reason.as_ref().is_some_and(|f| !f.launched);
+                    let message = if installing {
+                        lifetech_i18n::tr!("update-rollback-install")
+                    } else {
+                        lifetech_i18n::tr!("update-rollback")
+                    };
+                    ui.label(RichText::new(message).color(p.danger));
+                    // the helper's own words: what to tell, or to look at
+                    if let Some(failed) = &updater.rollback_reason {
+                        ui.label(
+                            RichText::new(lifetech_i18n::tr!("update-rollback-reason", reason = failed.reason.as_str()))
+                                .size(12.0)
+                                .color(p.muted),
+                        );
+                    }
                 }
                 _ => {}
             }
@@ -543,6 +559,7 @@ fn failure_text(kind: lifetech_updater::Failure) -> &'static str {
         // macOS: an application to replace, not a folder to extract
         Failure::Unsupported if cfg!(target_os = "macos") => lifetech_i18n::tr!("update-error-unsupported-macos"),
         Failure::Unsupported => lifetech_i18n::tr!("update-error-unsupported"),
+        Failure::DriveRoot => lifetech_i18n::tr!("update-error-drive-root"),
         Failure::Startup => lifetech_i18n::tr!("update-error-startup"),
     }
 }

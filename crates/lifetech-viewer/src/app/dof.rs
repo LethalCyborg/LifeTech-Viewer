@@ -69,6 +69,18 @@ impl App {
             }
             return Some(dof::lens(&s, d, view, debug));
         }
+        // the Director's lens while its window is open with its depth of
+        // field on: at its own aperture, focused on the lock's target or at
+        // the distance set there
+        if let Some((f_number, distance)) = self.director_dof() {
+            let s = dof::Settings {
+                enabled: true,
+                f_number,
+                ..self.settings.dof.clone()
+            };
+            let focus = self.dof_focus.update(distance, dt, s.transition);
+            return Some(dof::lens(&s, focus, view, false));
+        }
         // the photo window's lens while it is open, off included (its All
         // sharp is sharp, not the Preferences' blur), else the Preferences'
         // (never changed by the window)
@@ -78,7 +90,11 @@ impl App {
         } else {
             (self.settings.dof.clone(), None)
         };
-        if !s.enabled || (self.build.open && !s.in_edit) || (self.ik_editor.posing() && !self.ik_editor.poser_dof()) || !self.in_world() {
+        if !s.enabled
+            || (self.build.open && !s.in_edit)
+            || posing_turns_dof_off(self.ik_editor.posing(), self.ik_editor.poser_dof(), self.panels.snapshot)
+            || !self.in_world()
+        {
             return None;
         }
         // the viewfinder's AF-S: the lens where its hunt has it (the image
@@ -134,5 +150,32 @@ impl App {
             });
         }
         Some(lens)
+    }
+}
+
+/// Whether the poser turns the depth of field off: only outside the photo
+/// window, while its "Depth of field while posing" is off. The photo
+/// window's lens is the user's choice for the shot (off included, its All
+/// sharp), so posing in it keeps that lens. An Aurora rule: the Legacy
+/// Viewer's poser leaves the depth of field alone.
+fn posing_turns_dof_off(posing: bool, poser_dof: bool, photo_open: bool) -> bool {
+    posing && !poser_dof && !photo_open
+}
+
+#[cfg(test)]
+mod tests {
+    use super::posing_turns_dof_off;
+
+    #[test]
+    fn the_photo_window_keeps_its_depth_of_field_while_posing() {
+        // posing outside the photo window: the poser's setting decides
+        assert!(posing_turns_dof_off(true, false, false));
+        assert!(!posing_turns_dof_off(true, true, false));
+        // in the photo window: its lens stays, whatever the poser's setting
+        assert!(!posing_turns_dof_off(true, false, true));
+        assert!(!posing_turns_dof_off(true, true, true));
+        // not posing: nothing changes
+        assert!(!posing_turns_dof_off(false, false, false));
+        assert!(!posing_turns_dof_off(false, false, true));
     }
 }

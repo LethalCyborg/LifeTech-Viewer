@@ -59,6 +59,7 @@ pub fn events(frame: u64, agent: Uuid) -> Vec<NetEvent> {
             owner_id: Uuid::nil(),
             source_type: lifetech_net::ChatSourceType::Agent,
             chat_type: lifetech_net::ChatType::Normal,
+            region: Some(crate::demo::HANDLE),
             position: Vec3::ZERO,
             message: lifetech_i18n::tr!("demo-toast-hello").into(),
         })],

@@ -50,6 +50,33 @@ pub fn generated_name(name: &str, limit: usize) -> String {
         .collect()
 }
 
+/// A translated default that becomes an inventory name ("New folder", "New
+/// outfit", an unnamed object). Inventory names are plain ASCII
+/// (`Policy::Ascii`), so a translation that is not falls back to English,
+/// as the Legacy Viewer's untranslated "New Folder" and "New Outfit"
+/// (indra/newview/llviewerfoldertype.cpp): `generated_name` would turn
+/// Japanese into a row of '?'.
+pub fn default_name(key: &'static str) -> &'static str {
+    default_name_in(lifetech_i18n::language(), key)
+}
+
+pub fn default_name_in(language: &str, key: &'static str) -> &'static str {
+    let local = lifetech_i18n::text_in(language, key);
+    if local.is_ascii() {
+        local
+    } else {
+        lifetech_i18n::text_in("en", key)
+    }
+}
+
+/// "<outfit> (new)" for Save as: the suffix in English when the language's
+/// is not plain ASCII. The outfit's own name is kept as it is.
+pub fn new_variant_name_in(language: &str, base: &str) -> String {
+    let suffix = lifetech_i18n::tr_in!(language, "status-new", value0 = String::new());
+    let language = if suffix.is_ascii() { language } else { "en" };
+    lifetech_i18n::tr_in!(language, "status-new", value0 = base.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::world::{
@@ -85,10 +112,10 @@ mod tests {
     #[test]
     fn restricted_text_generated_folder_labels_are_cleaned_without_rejecting_creation() {
         for language in ["en", "fr", "ja"] {
-            let name = lifetech_i18n::text_in(language, "common-new-folder");
+            let name = super::default_name_in(language, "common-new-folder");
             let change = actions::create_folder(Uuid::from_u128(1), name).expect("localized folder");
             assert!(
-                matches!(&change.operations[..], [lifetech_net::inventory::operations::Operation::Folder { name, .. }] if !name.is_empty() && super::Policy::PrintableNoPipe.accepts(name))
+                matches!(&change.operations[..], [lifetech_net::inventory::operations::Operation::Folder { name, .. }] if !name.is_empty() && !name.contains('?') && super::Policy::PrintableNoPipe.accepts(name))
             );
         }
         let object_name = crate::build::task_inventory::contents_folder_name("★ Gift box");
@@ -115,5 +142,41 @@ mod tests {
         assert!(crate::ao::inventory::valid_name("Set 桜").is_err());
         assert!(crate::ao::inventory::valid_name("Set|Group").is_err());
         assert!(lifetech_net::groups::name::checked("A桜龙").is_none());
+    }
+    #[test]
+    fn default_names_stay_plain_ascii_in_every_language() {
+        for (language, _) in lifetech_i18n::available_languages() {
+            for key in [
+                "common-new-folder",
+                "inventory-new-outfit",
+                "ui-appearance-new-outfit",
+                "common-object",
+            ] {
+                let name = super::default_name_in(language, key);
+                assert!(
+                    name.is_ascii() && !name.is_empty() && !name.contains('?'),
+                    "{language} {key}: {name}"
+                );
+            }
+            let variant = super::new_variant_name_in(language, "Party");
+            assert!(variant.is_ascii() && !variant.contains('?'), "{language}: {variant}");
+            assert!(variant.starts_with("Party") && variant != "Party", "{language}: {variant}");
+        }
+        assert_eq!(
+            super::default_name_in("ja", "inventory-new-outfit"),
+            lifetech_i18n::text_in("en", "inventory-new-outfit")
+        );
+        assert_eq!(
+            super::default_name_in("fr", "common-new-folder"),
+            lifetech_i18n::text_in("fr", "common-new-folder")
+        );
+        assert_eq!(
+            super::new_variant_name_in("ja", "Party"),
+            lifetech_i18n::tr_in!("en", "status-new", value0 = "Party".to_string())
+        );
+        assert_eq!(
+            super::new_variant_name_in("fr", "Party"),
+            lifetech_i18n::tr_in!("fr", "status-new", value0 = "Party".to_string())
+        );
     }
 }

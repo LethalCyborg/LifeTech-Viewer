@@ -683,7 +683,7 @@ pub fn last_rates(d: &PerfData) -> (f32, f32) {
 
 /// The GPU parts of a frame, in [`GpuElement::ALL`] order: name and help
 /// (the resource monitor's breakdown).
-pub(crate) fn gpu_part_names() -> [(&'static str, &'static str); 7] {
+pub(crate) fn gpu_part_names() -> [(&'static str, &'static str); GpuElement::ALL.len()] {
     GpuElement::ALL.map(|el| match el {
         GpuElement::ShadowsDepth => (
             lifetech_i18n::tr!("ui-perf-shadows-and-depth"),
@@ -708,6 +708,10 @@ pub(crate) fn gpu_part_names() -> [(&'static str, &'static str); 7] {
         GpuElement::Transparent => (
             lifetech_i18n::tr!("ui-perf-transparent-objects-and-particles"),
             lifetech_i18n::tr!("ui-perf-semi-transparent-faces-and-particles"),
+        ),
+        GpuElement::Weather => (
+            lifetech_i18n::tr!("ui-perf-weather"),
+            lifetech_i18n::tr!("ui-perf-rain-and-wet-surfaces"),
         ),
         GpuElement::Post => (
             lifetech_i18n::tr!("ui-perf-post-processing"),
