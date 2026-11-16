@@ -5,6 +5,25 @@ What LifeTech Viewer changes compared with
 it is based on, version by version. Aurora's own improvements come in as
 they are released (see "Aurora Viewer updates" in each version).
 
+## 1.3.1 — 2026-11-17
+
+### Notecards
+- **Find and replace**: the search button beside the Classic, Markdown
+  and Edit tabs, or Ctrl+F, opens a bar with Find, Replace, Replace all
+  and Match case, in all three views. Enter or F3 finds the next match,
+  Shift+F3 the previous one, and the match is highlighted in the text.
+  Ctrl+Z takes a replacement back, and items embedded in the notecard are
+  never replaced away. In Markdown, Find searches the formatted text and
+  a replacement changes the notecard's text underneath.
+
+### Inventory
+- **Home, End, Page Up and Page Down** move the selection to the first
+  row, the last row or a page away; with Shift they extend it. With
+  nothing selected, Down starts at the top and Up at the bottom.
+- **The wide inventory keeps the keyboard**: after a click on a folder in
+  its left-hand column, typing letters and the arrow keys still move
+  through the list.
+
 ## 1.3.0 — 2026-11-17
 
 ### Aurora Viewer updates
