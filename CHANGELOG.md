@@ -5,6 +5,13 @@ What LifeTech Viewer changes compared with
 it is based on, version by version. Aurora's own improvements come in as
 they are released (see "Aurora Viewer updates" in each version).
 
+## 1.3.2 — 2026-11-18
+
+### People
+- **The LifeTech Team mark** (the glow on the name plate and the "LifeTech
+  Team" tag in chat, People and profiles) now goes to LifeTech's own team.
+  It used to mark Aurora's developers, a list carried over from Aurora.
+
 ## 1.3.1 — 2026-11-17
 
 ### Notecards
