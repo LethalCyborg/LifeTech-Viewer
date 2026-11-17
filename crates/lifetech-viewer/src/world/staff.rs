@@ -21,17 +21,9 @@ pub fn set_second_life(on: bool) {
     SECOND_LIFE.store(on, Ordering::Relaxed);
 }
 
-/// The team's avatar keys.
-const TEAM: &[Uuid] = &[
-    uuid::uuid!("348d7782-8438-4480-b482-608ca731b3a8"),
-    uuid::uuid!("eb902302-0a1a-4f51-9ca6-7148822d9e95"),
-    uuid::uuid!("322be05d-8851-4eaf-b4f2-a3347ebde023"),
-    uuid::uuid!("2401c1a6-0dde-4daf-b60f-420473687744"),
-    uuid::uuid!("d94d9882-b0bb-400b-9299-e51e021e921e"),
-    uuid::uuid!("64043ec6-40a2-44f2-8b50-d88c82b00548"),
-    uuid::uuid!("79e97f63-2410-43d0-aab2-92486a31b309"),
-    uuid::uuid!("b62dc313-c65b-44dd-9553-5dc222143024"),
-];
+/// The LifeTech team's avatar keys. LifeTech's own list: Aurora's team
+/// keys are not carried over (docs/AURORA_UPDATES.md).
+const TEAM: &[Uuid] = &[uuid::uuid!("7351a3c1-009e-4a95-b737-413ad34ebed1")];
 
 /// Whose staff a resident is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

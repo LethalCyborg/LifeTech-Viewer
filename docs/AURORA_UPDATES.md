@@ -96,3 +96,7 @@ After the merge of Aurora 47af7aed, every value that said "Aurora" was
 changed to "LifeTech" (keys and comments untouched); `about-based-on` keeps
 Aurora's name on purpose. Aurora's tests that name its own folders (`#Aurora`,
 `Aurora Library`) take LifeTech's (`#LifeTech`, `Build Chest`).
+
+The team mark ("LifeTech Team", `world/staff.rs`) lists LifeTech's own
+avatar keys, not Aurora's: when Aurora changes its `TEAM` list, keep
+LifeTech's.
