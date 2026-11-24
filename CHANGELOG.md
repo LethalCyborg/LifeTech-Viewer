@@ -5,6 +5,52 @@ What LifeTech Viewer changes compared with
 it is based on, version by version. Aurora's own improvements come in as
 they are released (see "Aurora Viewer updates" in each version).
 
+## 1.4.0 — 2026-11-25
+
+### Aurora Viewer updates
+Aurora's work up to 24 November 2026: about 110 new features and 240
+fixes. Among them:
+
+- **Ray tracing**: on graphics cards that have it, the Deluxe (RT) level
+  traces the shadows of the sun, the moon and lamps, lets coloured glass
+  tint the light and the light bounce into rooms.
+- **Windows outside the viewer**: send Conversations, the inventory or any
+  other window to a screen of its own, and bring it back.
+- **Twelve more languages**: German, Spanish, Italian, Polish, Turkish,
+  Russian, Ukrainian, Norwegian, Portuguese (Brazil and Portugal) and
+  Chinese (Simplified and Traditional).
+- **Photos and films**: the Director grows into a full film tool (shots,
+  renders up to 4K, films with sound), 360° pictures with a panorama
+  viewer, shadow and ambient occlusion controls in the photo window, "Look
+  at camera" for you and others, and photo filters as cards you drag.
+- **Inventory**: a dual-panel view, undo and redo, Restore to folder, tabs
+  and a split view in the wide explorer, and Favorite Wearables with
+  pictures and a Wear button.
+- **Notecards**: Find and Replace, the Legacy Viewer's, with Match case,
+  whole words and searching upwards (it replaces LifeTech's own bar of
+  1.3.1).
+- **Like the Legacy Viewer**: proxy settings (SOCKS 5 and HTTP), a target
+  frame rate (Autotune), the pose stand, script sync with outside editors,
+  saved poses from the Legacy Viewer and Alchemy in the poser, and many
+  RLVa fixes.
+- **And more**: volumetric clouds, faster texture decoding, gaming mode,
+  rebindable chat keys with Shift+Enter for a new line, a chat bar that can
+  hide, and a reset of the windows' places without resetting the settings.
+
+### Changed
+- **Region weather and shared portals are gone**: Aurora removed them, as
+  Second Life's policy does not let a viewer hide its own data in what
+  other residents receive. Your own weather and your own portals stay.
+
+### Kept from LifeTech
+- The inventory list takes the keyboard when it opens and after a folder
+  is chosen in the wide view's column, so typed letters jump to rows.
+- Ctrl+W waits five seconds before it closes a new script dialog,
+  permission request or object offer, so a dialog not yet read is never
+  closed by a stray key.
+- The button back to the latest messages shows only while the mouse is
+  over the conversation.
+
 ## 1.3.2 — 2026-11-18
 
 ### People
