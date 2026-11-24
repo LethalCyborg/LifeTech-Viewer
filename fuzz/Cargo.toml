@@ -24,6 +24,7 @@ libfuzzer = ["dep:libfuzzer-sys"]
 [dependencies]
 lifetech-assets = { path = "../crates/lifetech-assets" }
 lifetech-audio = { path = "../crates/lifetech-audio" }
+aurora-editor-sync = { path = "../crates/aurora-editor-sync" }
 lifetech-llsd = { path = "../crates/lifetech-llsd" }
 lifetech-msg = { path = "../crates/lifetech-msg" }
 lifetech-net = { path = "../crates/lifetech-net" }
@@ -50,6 +51,10 @@ debug-assertions = true
 overflow-checks = true
 
 [profile.release.package.lifetech-audio]
+debug-assertions = true
+overflow-checks = true
+
+[profile.release.package.aurora-editor-sync]
 debug-assertions = true
 overflow-checks = true
 
@@ -102,6 +107,14 @@ bench = false
 [[bin]]
 name = "llsd"
 path = "fuzz_targets/llsd.rs"
+required-features = ["libfuzzer"]
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "editor"
+path = "fuzz_targets/editor.rs"
 required-features = ["libfuzzer"]
 test = false
 doc = false

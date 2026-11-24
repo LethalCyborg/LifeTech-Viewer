@@ -560,6 +560,7 @@ fn failure_text(kind: lifetech_updater::Failure) -> &'static str {
         Failure::Unsupported if cfg!(target_os = "macos") => lifetech_i18n::tr!("update-error-unsupported-macos"),
         Failure::Unsupported => lifetech_i18n::tr!("update-error-unsupported"),
         Failure::DriveRoot => lifetech_i18n::tr!("update-error-drive-root"),
+        Failure::Protected => lifetech_i18n::tr!("update-error-protected"),
         Failure::Startup => lifetech_i18n::tr!("update-error-startup"),
     }
 }
@@ -650,7 +651,7 @@ mod tests {
             notes: "Synthetic notes".into(),
             url: lifetech_updater::feed::RELEASE_PAGE.into(),
             archive: None,
-            checksum: None,
+            sha256: None,
             required: true,
             minimum: Some("0.3.0".into()),
             grace: std::time::Duration::ZERO,
@@ -718,7 +719,7 @@ mod tests {
             notes: "Synthetic notes".into(),
             url: lifetech_updater::feed::RELEASE_PAGE.into(),
             archive: None,
-            checksum: None,
+            sha256: None,
             required: true,
             minimum: Some("0.3.0".into()),
             grace: std::time::Duration::from_secs(12 * 3600),

@@ -127,6 +127,15 @@ fn grounded(w: &World, _: &Ctx) -> Option<String> {
     w.agent.flying.then(|| "the avatar is flying: @fly=n would land it".to_owned())
 }
 
+/// A HUD the avatar wears, whichever comes first.
+fn worn_hud(w: &World) -> Option<usize> {
+    w.objects.iter().map(|(i, _)| i).find(|i| w.hud_root(*i) == Some(*i))
+}
+
+fn wears_hud(w: &World, _: &Ctx) -> Option<String> {
+    worn_hud(w).is_none().then(|| "the avatar wears no HUD".to_owned())
+}
+
 fn clothed(w: &World, _: &Ctx) -> Option<String> {
     worn_layer(w).is_none().then(|| "the avatar wears no clothing layer".to_owned())
 }
@@ -164,9 +173,24 @@ const RULES: &[Rule] = &[
         "@interact",
         "@interact=n",
         "@interact=y",
+        // (the Create tool asks it, LLToolPlacer::placeObject; the chat
+        // bar's platform does not, `int-G6-add-under-interact`)
         "creating an object refused",
-        |w, _| can(w, &probe_add(w)),
+        |w, _| w.rlva_can_rez(None),
     ),
+    // LLViewerWindow::cursorIntersect: a HUD's pick is dropped like the
+    // world's, so its click and its menu go too
+    Rule {
+        needs: Some(wears_hud),
+        ..rule(
+            "A02b",
+            "@interact on a HUD",
+            "@interact=n",
+            "@interact=y",
+            "the click and the menu of a worn HUD refused",
+            |w, _| worn_hud(w).is_some_and(|i| w.rlva_can_interact_at(i, None) && w.rlva_can_designate(i, None)),
+        )
+    },
     rule(
         "A03",
         "@edit with @rez",
@@ -315,8 +339,8 @@ const RULES: &[Rule] = &[
     rule(
         "A25",
         "@remattach on one point",
-        "@remattach:hind left foot=n",
-        "@remattach:hind left foot=y",
+        "@remattach:left hind foot=n",
+        "@remattach:left hind foot=y",
         "taking off what that point holds refused",
         |w, c| w.rlva_can_remove(c.item(It::A), Uuid::nil()),
     ),
@@ -364,6 +388,24 @@ const RULES: &[Rule] = &[
             |w, _| worn_layer(w).is_some_and(|(item, _)| w.rlva_can_remove(item, Uuid::nil())),
         )
     },
+    // RlvActions::canChangeToMouselook: what the camera asks before it
+    // enters mouselook (#3357)
+    rule(
+        "A33",
+        "@setcam_mouselook",
+        "@setcam_mouselook=n",
+        "@setcam_mouselook=y",
+        "mouselook refused",
+        |w, _| w.rlva.can_mouselook(),
+    ),
+    rule(
+        "A34",
+        "@camdistmin above zero",
+        "@camdistmin:1=n",
+        "@camdistmin:1=y",
+        "mouselook refused",
+        |w, _| w.rlva.can_mouselook(),
+    ),
 ];
 
 fn case(id: &'static str, title: &'static str, steps: Vec<Step>) -> Case {
@@ -450,7 +492,7 @@ fn rules() -> Vec<Case> {
         "A30",
         "point locks leave the other points",
         vec![
-            Step::Say(Who::Controller, "@addattach:tail tip=n,remattach:hind left foot=n"),
+            Step::Say(Who::Controller, "@addattach:tail tip=n,remattach:left hind foot=n"),
             Step::Expect(
                 "the locked points refuse",
                 holds(
@@ -488,6 +530,18 @@ fn rules() -> Vec<Case> {
             Step::Now(
                 "named in the friends list and a group's members",
                 holds(named(|_| NameScope::Roster), "hidden there too"),
+            ),
+            Step::Now(
+                "the notice of a message or of a teleport offer names its resident, an inventory offer's does not",
+                holds(
+                    |w, c| {
+                        use crate::world::notifications::Kind;
+                        w.rlva_shows_name(Kind::Message.names(), c.other)
+                            && w.rlva_shows_name(Kind::Teleport.names(), c.other)
+                            && !w.rlva_shows_name(Kind::Inventory.names(), c.other)
+                    },
+                    "the notices do not follow their kind",
+                ),
             ),
             Step::Now(
                 "a creator who owns the object is hidden",
@@ -616,7 +670,7 @@ fn replies() -> Vec<Case> {
             "B04",
             "@getattach counts the worn test objects",
             "@getattach={ch}",
-            "1 on Hind Left Foot and Hind Right Foot",
+            "1 on Left Hind Foot and Right Hind Foot",
             answers(|_, _, text| {
                 let at = |p: u8| text.as_bytes().get(usize::from(p)).copied();
                 text.len() == POINTS.len() && at(POINT_A) == Some(b'1') && at(POINT_CONTROLLER) == Some(b'1') && at(0) == Some(b'0')
@@ -659,7 +713,7 @@ fn replies() -> Vec<Case> {
                         names.contains(&point_name(w, POINT_A)) && names.contains(&point_name(w, POINT_CONTROLLER))
                     }),
                 ),
-                Step::Say(Who::Controller, "@remattach:hind left foot=n"),
+                Step::Say(Who::Controller, "@remattach:left hind foot=n"),
                 Step::Say(Who::Controller, "@getremattachnames={ch}"),
                 Step::Expect(
                     "the locked point left out, the other named",
@@ -714,12 +768,12 @@ fn replies() -> Vec<Case> {
             "the active group, or none",
             // (the reply is a group's name: a failure does not quote it)
             test(|w, c| {
-                let expected = w
-                    .groups
-                    .groups
-                    .iter()
-                    .find(|g| g.id == w.groups.active)
-                    .map_or("none", |g| g.name.as_str());
+                // gAgent.getGroupName(): the name AgentDataUpdate gave
+                let expected = if w.groups.active.is_nil() || w.groups.active_name.is_empty() {
+                    "none"
+                } else {
+                    w.groups.active_name.as_str()
+                };
                 if reply(c)? == expected {
                     Ok(())
                 } else {
@@ -804,7 +858,7 @@ fn round_trips() -> Vec<Case> {
             steps(vec![
                 wear(It::B, POINT_B).into(),
                 vec![
-                    Step::Say(Who::Controller, "@detach:hind left foot=n"),
+                    Step::Say(Who::Controller, "@detach:left hind foot=n"),
                     Step::Expect(
                         "the point is locked",
                         holds(|w, c| !w.rlva_can_remove(c.item(It::A), Uuid::nil()), "not locked"),
@@ -842,6 +896,23 @@ fn round_trips() -> Vec<Case> {
                 vec![
                     Step::Say(Who::Controller, "@attach:{f}/tagged=force"),
                     Step::Expect("the tagged object on Tail Tip, the former one off", tagged_replaced_b()),
+                ],
+                take_off(&[It::Tagged]).into(),
+            ]),
+        ),
+        case(
+            "C2d",
+            "a replacing wear under a lock of its own refuses nothing (#3633)",
+            steps(vec![
+                vec![no_foreign_tail()],
+                take_off(&[It::Tagged]).into(),
+                wear(It::B, POINT_B).into(),
+                vec![
+                    // the HUD locks itself, as the tester's script does
+                    Step::Say(Who::Controller, "@detach=n"),
+                    Step::Say(Who::Controller, "@attach:{f}/tagged=force"),
+                    Step::Expect("the tagged object on Tail Tip, the former one off", tagged_replaced_b()),
+                    Step::Say(Who::Controller, "@detach=y"),
                 ],
                 take_off(&[It::Tagged]).into(),
             ]),
@@ -1041,6 +1112,31 @@ fn round_trips() -> Vec<Case> {
                 ],
             ]),
         ),
+        // RlvForceWear::forceDetach (rlvhelper.cpp) reads the locks when the
+        // force is processed: the release that follows it in the same
+        // message comes too late for it.
+        case(
+            "C6",
+            "a forced removal between a lock and its release in one message obeys the lock",
+            steps(vec![
+                vec![no_foreign_tail()],
+                wear(It::B, POINT_B).into(),
+                vec![
+                    Step::Say(
+                        Who::Controller,
+                        "@remattach:tail tip=n,remattach:tail tip=force,remattach:tail tip=y",
+                    ),
+                    Step::Expect(
+                        "the lock is released",
+                        holds(|w, c| w.rlva_can_remove(c.item(It::B), Uuid::nil()), "still locked"),
+                    ),
+                    Step::Pause(Duration::from_secs(2)),
+                    Step::Now("the object is still worn", holds(|w, c| c.worn(w, It::B), "it was taken off")),
+                    Step::Say(Who::Controller, "@remattach:tail tip=force"),
+                    Step::Expect("without the lock it comes off", holds(|w, c| !c.worn(w, It::B), "still worn")),
+                ],
+            ]),
+        ),
     ]
 }
 
@@ -1049,5 +1145,12 @@ pub(super) fn phase1() -> Vec<Case> {
     cases.sort_by_key(|c| c.id);
     cases.extend(replies());
     cases.extend(round_trips());
+    cases.extend(super::cases_core::cases());
+    cases.extend(super::cases_chat::cases());
+    cases.extend(super::cases_privacy::phase1());
+    cases.extend(super::cases_move::phase1());
+    cases.extend(super::cases_int::cases());
+    cases.extend(super::cases_cam::cases());
+    cases.extend(super::cases_inv::phase1());
     cases
 }

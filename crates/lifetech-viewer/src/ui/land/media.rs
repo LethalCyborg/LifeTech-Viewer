@@ -140,9 +140,9 @@ pub(super) fn show(
         }
         if r.on_hover_text(lifetech_i18n::tr!("common-click-to-select-an-image")).clicked() {
             s.texture_snapshot = false;
-            s.texture.open(lifetech_i18n::tr!("ui-land-media-media-texture"), id);
+            s.texture.open_copy_transfer(lifetech_i18n::tr!("ui-land-media-media-texture"), id);
         }
-        s.texture.drop_target_slot(ui, rect, false, can, 0);
+        s.texture.drop_target_slot_copy_transfer(ui, rect, can, 0);
         ui.add_space(8.0);
         ui.add(
             egui::Label::new(

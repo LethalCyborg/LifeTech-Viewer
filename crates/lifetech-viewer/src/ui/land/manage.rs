@@ -1028,9 +1028,9 @@ fn visibility(
             if r.on_hover_text(lifetech_i18n::tr!("common-click-to-select-an-image")).clicked() {
                 s.texture_snapshot = true;
                 s.texture
-                    .open(lifetech_i18n::tr!("ui-land-options-land-picture"), parcel.snapshot_id);
+                    .open_copy_transfer(lifetech_i18n::tr!("ui-land-options-land-picture"), parcel.snapshot_id);
             }
-            s.texture.drop_target_slot(ui, rect, false, can_identity, 1);
+            s.texture.drop_target_slot_copy_transfer(ui, rect, can_identity, 1);
         },
     );
 }
@@ -1363,9 +1363,9 @@ fn parcel_media(
             }
             if r.on_hover_text(lifetech_i18n::tr!("common-click-to-select-an-image")).clicked() {
                 s.texture_snapshot = false;
-                s.texture.open(lifetech_i18n::tr!("ui-land-media-media-texture"), id);
+                s.texture.open_copy_transfer(lifetech_i18n::tr!("ui-land-media-media-texture"), id);
             }
-            s.texture.drop_target_slot(ui, rect, false, can, 0);
+            s.texture.drop_target_slot_copy_transfer(ui, rect, can, 0);
         },
     );
     line(ui, p);
@@ -1822,7 +1822,7 @@ fn sale(ui: &mut egui::Ui, p: &Palette, s: &mut LandUi, v: &View, world: &mut Wo
             lifetech_i18n::tr!("common-everyone").to_owned()
         } else {
             world.social.want_name(parcel.auth_buyer);
-            world.social.name_of(&parcel.auth_buyer)
+            world.social.name_in(crate::world::names::NameScope::Roster, &parcel.auth_buyer)
         };
         t.push_str(&format!(" · {}", lifetech_i18n::tr!("ui-land-manage-sold-to", who = to)));
         t.push_str(" · ");

@@ -17,7 +17,7 @@ pub(crate) fn defaults(ui: &mut egui::Ui, p: &Palette, prefs: &mut Preferences) 
     );
     ui.add_space(10.0);
     let columns = [
-        (64.0, lifetech_i18n::tr!("common-edit"), lifetech_i18n::tr!("common-edit")),
+        (64.0, lifetech_i18n::tr!("common-modify"), lifetech_i18n::tr!("common-modify")),
         (64.0, lifetech_i18n::tr!("common-copy-2"), lifetech_i18n::tr!("common-copy-2")),
         (70.0, lifetech_i18n::tr!("common-transfer"), lifetech_i18n::tr!("common-transfer")),
         (

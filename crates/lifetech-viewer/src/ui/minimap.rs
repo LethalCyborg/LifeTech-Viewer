@@ -12,7 +12,7 @@ use super::context::{self, AvatarList, CtxAction};
 use super::map_tiles::MapTiles;
 use super::menu;
 use crate::scene::Scene;
-use crate::settings::MapSettings;
+use crate::settings::{MapSettings, MiniAvatarNameFormat};
 use crate::theme::Palette;
 use crate::world::World;
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2};
@@ -220,6 +220,7 @@ pub fn avatars(world: &World) -> Vec<(Uuid, Vec3, bool)> {
     let mut out: Vec<(Uuid, Vec3, bool)> = Vec::new();
     for (idx, o) in world.objects.avatars() {
         if o.full_id != world.agent_id
+            && !world.is_mirror(&o.full_id)
             && let Some((p, _, _)) = Scene::object_transform(world, idx, now, 0)
         {
             out.push((o.full_id, p, true));
@@ -240,11 +241,409 @@ pub fn avatars(world: &World) -> Vec<(Uuid, Vec3, bool)> {
     out
 }
 
-pub fn avatar_name(world: &World, id: &Uuid) -> String {
+fn formatted_avatar_name(
+    name: &crate::world::names::AvatarName,
+    options: &crate::world::names::NameOptions,
+    format: MiniAvatarNameFormat,
+) -> String {
+    if !options.use_display_names {
+        return name.display(options);
+    }
+    let account = if options.legacy_format || name.username.is_empty() {
+        name.user_name_for_display(options)
+    } else {
+        name.username.clone()
+    };
+    match format {
+        MiniAvatarNameFormat::Display => name.display(options),
+        MiniAvatarNameFormat::Legacy => account,
+        _ if name.display_name == account => account,
+        // LLNetMap::handleToolTipAgent uses getCompleteName in the Legacy Viewer.
+        MiniAvatarNameFormat::DisplayAndLegacy => name.complete(options),
+        MiniAvatarNameFormat::LegacyAndDisplay if name.is_default => account,
+        MiniAvatarNameFormat::LegacyAndDisplay if options.legacy_format || options.show_usernames => {
+            format!("{account} ({})", name.display_name)
+        }
+        MiniAvatarNameFormat::LegacyAndDisplay => name.display(options),
+    }
+}
+
+/// The name of a dot while the display-name cache has none: the avatar's
+/// name values when it is loaded, else its legacy name (UUIDNameReply).
+/// Every dot counts, loaded or only known by its coarse location: the Legacy
+/// Viewer names, colours and offers actions for every avatar
+/// LLWorld::getAvatars returns (LLNetMap::draw, handleToolTipAgent and
+/// handleRightMouseDown, indra/newview/llnetmap.cpp), a private parcel's or
+/// one beyond the draw distance included. Parcel privacy hides the avatar
+/// in the world, not on the map (the simulator still sends its location).
+fn fallback_name(world: &World, id: &Uuid) -> Option<String> {
     world
-        .avatar_name(id)
-        .or_else(|| world.social.names.get(id).cloned())
+        .objects
+        .index_of_uuid(id)
+        .and_then(|index| world.objects.get(index))
+        .filter(|object| object.is_avatar())
+        .and_then(|object| object.display_name())
+        .filter(|name| !name.is_empty())
+        .or_else(|| world.social.names.get(id).filter(|name| !name.is_empty()).cloned())
+}
+
+/// The colour of an avatar's dot: LLNetMap::getAvatarColor (its mark, its
+/// contact set, its relation), or the others' colour while RLVa or the name
+/// settings hide its name (LLNetMap::draw, indra/newview/llnetmap.cpp).
+/// The Dev Toolbox's hitboxes take it too, as LLDrawPoolAvatar::renderAvatars
+/// does (stricter there: the Legacy Viewer's hitbox does not ask RLVa).
+pub(crate) fn avatar_color(world: &World, id: &Uuid) -> Color32 {
+    if names_allowed(world, id) {
+        super::colors::map_color(world, id, &fallback_name(world, id).unwrap_or_default())
+    } else {
+        super::colors::c(super::colors::get().map_other)
+    }
+}
+
+fn names_allowed(world: &World, id: &Uuid) -> bool {
+    world.rlva_can_name(*id) && world.social.avatar_names.shows(crate::world::names::NameScope::World, id)
+}
+
+/// The mini-map's "Markers" menu of a dot: for any avatar on the map, their
+/// name hidden by RLVa or not. LLNetMap::handleRightMouseDown
+/// (indra/newview/llnetmap.cpp) shows "MarkAvatar" for any agent under the
+/// pointer and leaves it out of the entries `@shownames` greys.
+pub(super) fn can_mark(world: &World, id: &Uuid) -> bool {
+    on_map(world, id)
+}
+
+/// `id` has a dot: a loaded avatar or a coarse location (LLWorld::getAvatars).
+fn on_map(world: &World, id: &Uuid) -> bool {
+    *id != world.agent_id
+        && (world
+            .objects
+            .index_of_uuid(id)
+            .and_then(|index| world.objects.get(index))
+            .is_some_and(|object| object.is_avatar())
+            || world.coarse.values().any(|list| list.iter().any(|(coarse, _)| coarse == id)))
+}
+
+/// LLNetMap::handleToolTipAgent: the name cache's name of any dot, asked
+/// for when missing; only RLVa and the name settings hide it.
+fn avatar_name(world: &World, id: &Uuid, format: MiniAvatarNameFormat) -> String {
+    let names = &world.social.avatar_names;
+    if !names_allowed(world, id) {
+        return names.anonymous(id).display_name.clone();
+    }
+    names
+        .get(id)
+        .map(|name| formatted_avatar_name(name, &names.options, format))
+        .or_else(|| fallback_name(world, id))
         .unwrap_or_else(|| "…".into())
+}
+
+#[cfg(test)]
+mod name_format_tests {
+    use super::*;
+    use crate::world::names::{AvatarName, NameOptions};
+
+    const FORMATS: [MiniAvatarNameFormat; 4] = [
+        MiniAvatarNameFormat::Display,
+        MiniAvatarNameFormat::Legacy,
+        MiniAvatarNameFormat::DisplayAndLegacy,
+        MiniAvatarNameFormat::LegacyAndDisplay,
+    ];
+
+    #[test]
+    fn existing_map_preferences_default_to_the_complete_name_and_all_formats_round_trip() {
+        let mut options: MapSettings = serde_json::from_str(r#"{"mini_scale":256.0}"#).unwrap();
+        assert_eq!(options.mini_scale, 256.0);
+        assert_eq!(options.mini_avatar_name_format, MiniAvatarNameFormat::DisplayAndLegacy);
+        for format in FORMATS {
+            options.mini_avatar_name_format = format;
+            let saved = serde_json::to_string(&options).unwrap();
+            assert_eq!(serde_json::from_str::<MapSettings>(&saved).unwrap(), options);
+        }
+    }
+
+    fn example_name() -> AvatarName {
+        AvatarName {
+            username: "john.smith".into(),
+            display_name: "Captain Jack".into(),
+            legacy_first: "John".into(),
+            legacy_last: "Smith".into(),
+            ..AvatarName::default()
+        }
+    }
+
+    #[test]
+    fn each_minimap_name_format() {
+        let name = example_name();
+        let options = NameOptions::default();
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::Display),
+            "Captain Jack"
+        );
+        assert_eq!(formatted_avatar_name(&name, &options, MiniAvatarNameFormat::Legacy), "John Smith");
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::DisplayAndLegacy),
+            "Captain Jack (John Smith)"
+        );
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::LegacyAndDisplay),
+            "John Smith (Captain Jack)"
+        );
+    }
+
+    #[test]
+    fn default_or_identical_names_are_not_repeated() {
+        let mut name = example_name();
+        let options = NameOptions::default();
+        name.is_default = true;
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::DisplayAndLegacy),
+            "Captain Jack"
+        );
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::LegacyAndDisplay),
+            "John Smith"
+        );
+        name.is_default = false;
+        name.display_name = "John Smith".into();
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::DisplayAndLegacy),
+            "John Smith"
+        );
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::LegacyAndDisplay),
+            "John Smith"
+        );
+    }
+
+    #[test]
+    fn minimap_formats_follow_the_global_display_name_preferences() {
+        let name = example_name();
+        let mut options = NameOptions {
+            legacy_format: false,
+            ..Default::default()
+        };
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::DisplayAndLegacy),
+            "Captain Jack (john.smith)"
+        );
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::LegacyAndDisplay),
+            "john.smith (Captain Jack)"
+        );
+        options.show_usernames = false;
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::DisplayAndLegacy),
+            "Captain Jack"
+        );
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::LegacyAndDisplay),
+            "Captain Jack"
+        );
+        options.use_display_names = false;
+        for format in FORMATS {
+            assert_eq!(formatted_avatar_name(&name, &options, format), "John Smith");
+        }
+    }
+
+    fn visible_resident(world: &mut World, id: Uuid, local: u32, first: &str, last: &str) -> usize {
+        let mut object = crate::demo::hud::object(32, false);
+        object.pcode = lifetech_prim::params::LL_PCODE_LEGACY_AVATAR;
+        object.parent_id = 0;
+        object.full_id = id;
+        object.local_id = local;
+        object.name_values = if first.is_empty() {
+            String::new()
+        } else {
+            format!("FirstName STRING RW SV {first}\nLastName STRING RW SV {last}")
+        };
+        world.objects.upsert(1, object)
+    }
+
+    #[test]
+    fn a_visible_avatar_can_receive_its_cached_display_name_before_the_object_name_values() {
+        let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        let (first, second) = (Uuid::from_u128(41), Uuid::from_u128(42));
+        let name = |id| lifetech_net::AvatarNameData {
+            id,
+            username: "john.smith".into(),
+            display_name: "Captain Jack".into(),
+            legacy_first: "John".into(),
+            legacy_last: "Smith".into(),
+            ..Default::default()
+        };
+        let format = MiniAvatarNameFormat::DisplayAndLegacy;
+        world.social.avatar_names.on_display_names(&[name(first)], &[], Some(3600));
+        // not on the map yet: nothing to mark
+        assert!(!can_mark(&world, &first));
+        visible_resident(&mut world, first, 1, "", "");
+        visible_resident(&mut world, second, 2, "", "");
+        assert_eq!(avatar_name(&world, &second, format), "…");
+        assert_eq!(world.social.avatar_names.take_asks(), vec![second]);
+        world.social.avatar_names.on_display_names(&[name(second)], &[], Some(3600));
+        for id in [first, second] {
+            assert!(can_mark(&world, &id));
+            assert_eq!(avatar_name(&world, &id, format), "Captain Jack (John Smith)");
+        }
+        world.social.avatar_names.set_rlva_privacy(true, Default::default());
+        for id in [first, second] {
+            // a hidden name keeps its "Markers" menu, as in the Legacy Viewer
+            assert!(can_mark(&world, &id));
+            assert_eq!(
+                avatar_name(&world, &id, format),
+                world.social.avatar_names.anonymous(&id).display_name
+            );
+        }
+    }
+
+    #[test]
+    fn minimap_names_honor_rlva_privacy_in_all_formats() {
+        let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        world.agent_id = Uuid::from_u128(1);
+        let known = Uuid::from_u128(42);
+        let not_cached = Uuid::from_u128(43);
+        let known_index = visible_resident(&mut world, known, 1, "John", "Smith");
+        visible_resident(&mut world, not_cached, 2, "", "");
+        world.social.avatar_names.on_display_names(
+            &[lifetech_net::AvatarNameData {
+                id: known,
+                username: "john.smith".into(),
+                display_name: "Captain Jack".into(),
+                legacy_first: "John".into(),
+                legacy_last: "Smith".into(),
+                ..Default::default()
+            }],
+            &[],
+            Some(3600),
+        );
+        // The legacy fallback has a real name even though the display cache does not.
+        world.social.names.insert(not_cached, "Other Resident".into());
+
+        let expected = [
+            "Captain Jack",
+            "John Smith",
+            "Captain Jack (John Smith)",
+            "John Smith (Captain Jack)",
+        ];
+        for (format, name) in FORMATS.into_iter().zip(expected) {
+            assert_eq!(avatar_name(&world, &known, format), name);
+        }
+
+        // RLVa must win over both a cached real name and the legacy fallback.
+        world.social.avatar_names.set_rlva_privacy(true, Default::default());
+        for id in [known, not_cached] {
+            let anonymous = world.social.avatar_names.anonymous(&id).display_name.as_str();
+            for format in FORMATS {
+                assert_eq!(avatar_name(&world, &id, format), anonymous, "privacy leak for {id} in {format:?}");
+            }
+        }
+
+        // An explicit RLVa exception can reveal only that resident's name.
+        world
+            .social
+            .avatar_names
+            .set_rlva_privacy(true, std::collections::HashSet::from([known]));
+        for (format, name) in FORMATS.into_iter().zip(expected) {
+            assert_eq!(avatar_name(&world, &known, format), name);
+            assert_eq!(
+                avatar_name(&world, &not_cached, format),
+                crate::world::rlva::privacy::anonymous(not_cached).display_name
+            );
+        }
+
+        // Removing the restriction restores the normal formatting and fallback.
+        world.social.avatar_names.set_rlva_privacy(false, Default::default());
+        for (format, name) in FORMATS.into_iter().zip(expected) {
+            assert_eq!(avatar_name(&world, &known, format), name);
+            assert_eq!(avatar_name(&world, &not_cached, format), "Other Resident");
+        }
+
+        // The live restriction takes effect even before the cache updates its scope.
+        world.rlva_configure(true);
+        assert!(world.rlva.receive(&lifetech_net::ChatMessage {
+            from_name: "Name fixture".into(),
+            source_id: Uuid::from_u128(4),
+            owner_id: world.agent_id,
+            source_type: lifetech_net::ChatSourceType::Object,
+            chat_type: lifetech_net::ChatType::OwnerSay,
+            region: None,
+            position: Vec3::ZERO,
+            message: "@shownames=n".into(),
+        }));
+        for format in FORMATS {
+            assert_eq!(
+                avatar_name(&world, &known, format),
+                world.social.avatar_names.anonymous(&known).display_name
+            );
+        }
+
+        // RLVa still hides a dot known only by its coarse location.
+        world.objects.remove_idx(known_index);
+        world.coarse.insert(1, vec![(known, Vec3::new(1.0, 2.0, 3.0))]);
+        for format in FORMATS {
+            assert_eq!(
+                avatar_name(&world, &known, format),
+                world.social.avatar_names.anonymous(&known).display_name
+            );
+        }
+    }
+
+    /// LLNetMap::handleToolTipAgent and handleRightMouseDown name and offer
+    /// the actions of every dot, a private parcel's or one beyond the draw
+    /// distance included (issues #4271 and #4425).
+    #[test]
+    fn a_coarse_only_dot_is_named_and_offers_its_actions_like_the_legacy_viewer() {
+        let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        world.agent_id = Uuid::from_u128(1);
+        let (cached, legacy_only, unknown) = (Uuid::from_u128(42), Uuid::from_u128(43), Uuid::from_u128(44));
+        world.coarse.insert(
+            1,
+            vec![
+                (cached, Vec3::new(1.0, 2.0, 3.0)),
+                (legacy_only, Vec3::new(4.0, 5.0, 6.0)),
+                (unknown, Vec3::new(7.0, 8.0, 9.0)),
+            ],
+        );
+        world.social.avatar_names.on_display_names(
+            &[lifetech_net::AvatarNameData {
+                id: cached,
+                username: "john.smith".into(),
+                display_name: "Captain Jack".into(),
+                legacy_first: "John".into(),
+                legacy_last: "Smith".into(),
+                ..Default::default()
+            }],
+            &[],
+            Some(3600),
+        );
+        world.social.names.insert(legacy_only, "Other Resident".into());
+        let _ = world.social.avatar_names.take_asks();
+
+        let expected = [
+            "Captain Jack",
+            "John Smith",
+            "Captain Jack (John Smith)",
+            "John Smith (Captain Jack)",
+        ];
+        for (format, name) in FORMATS.into_iter().zip(expected) {
+            assert_eq!(avatar_name(&world, &cached, format), name);
+            assert_eq!(avatar_name(&world, &legacy_only, format), "Other Resident");
+            assert_eq!(avatar_name(&world, &unknown, format), "…");
+        }
+        // a missing name is asked for, as LLAvatarNameCache::get does
+        let mut asked = world.social.avatar_names.take_asks();
+        asked.sort();
+        assert_eq!(asked, vec![legacy_only, unknown]);
+
+        for id in [cached, legacy_only, unknown] {
+            assert!(on_map(&world, &id));
+            assert!(can_mark(&world, &id));
+        }
+        // the agent and someone who left the map have no dot
+        assert!(!on_map(&world, &world.agent_id.clone()));
+        world.coarse.clear();
+        assert!(!on_map(&world, &cached));
+        assert!(!can_mark(&world, &cached));
+    }
 }
 
 /// LLWorldMapView::drawAvatar: a dot, with a cap above / below when the
@@ -622,6 +1021,7 @@ impl MiniMap {
         // --- avatars ---
         let dot_r = (DOT_SCALE * ppm).max(MIN_DOT_RADIUS);
         let pointer = resp.hover_pos();
+        let k = super::colors::get();
         let mut closest: Option<(f32, Uuid, Vec3, bool)> = None;
         let mut under: Vec<Uuid> = Vec::new();
         for (id, pos, known) in avatars(world) {
@@ -630,11 +1030,7 @@ impl MiniMap {
             if !rect.expand(dot_r).contains(sp) {
                 continue;
             }
-            // the mark first, then the contact set, then the relation
-            // (LLNetMap::getAvatarColor): the same in every mini-map; the
-            // others' colour for a resident whose name RLVa hides
-            let name = avatar_name(world, &id);
-            let col = super::colors::map_color(world, &id, &name);
+            let col = avatar_color(world, &id);
             // unknown height: shown above while the camera is under 1020 m
             let dz = if known {
                 Some(pos.z - cam.pos.z)
@@ -662,7 +1058,6 @@ impl MiniMap {
         }
 
         // --- self ---
-        let k = super::colors::get();
         let me = world.agent.position;
         let gme = to_global(world, me);
         draw_self(&painter, view.to_screen(gme.0, gme.1), dot_r, super::colors::c(k.map_me));
@@ -717,7 +1112,7 @@ impl MiniMap {
             } else {
                 pos.truncate().distance(me.truncate())
             };
-            let name = avatar_name(world, &id);
+            let name = avatar_name(world, &id, opts.mini_avatar_name_format);
             resp.clone().on_hover_text_at_pointer(lifetech_i18n::tr!(
                 "status-name-distance-d-m",
                 name = name.to_string(),
@@ -778,14 +1173,15 @@ impl MiniMap {
             self.popup = Some((view.to_global(m), under.clone()));
         }
         menu::context_menu(&resp, p, |ui| {
-            let Some(((px, py), avs)) = self.popup.clone() else {
+            let Some(((px, py), mut avs)) = self.popup.clone() else {
                 ui.close();
                 return;
             };
-            // LLNetMap::handleRightMouseDown (llnetmap.cpp): RLVa @shownames
-            // greys the entries that lead to a resident's identity, for
-            // everyone under the pointer, excepted or not
-            let can_show_names = !world.rlva.has("shownames");
+            // Recheck the picked avatars while their menu is open: they can leave.
+            avs.retain(|id| on_map(world, id));
+            // LLNetMap::handleRightMouseDown greys identity actions for everyone
+            // under @shownames, including its exceptions.
+            let can_show_names = !world.rlva.has("shownames") && avs.iter().all(|id| names_allowed(world, id));
             if let Some(&first) = avs.first() {
                 if avs.len() == 1 {
                     if menu::item_if(ui, p, "user-filled", lifetech_i18n::tr!("common-view-profile"), can_show_names) {
@@ -801,7 +1197,7 @@ impl MiniMap {
                         can_show_names,
                         |ui| {
                             for id in &avs {
-                                if menu::item(ui, p, "user-filled", &avatar_name(world, id)) {
+                                if menu::item(ui, p, "user-filled", &avatar_name(world, id, opts.mini_avatar_name_format)) {
                                     actions.push(MiniMapAction::Profile(*id));
                                 }
                             }
@@ -814,10 +1210,10 @@ impl MiniMap {
                 }
                 menu::todo(ui, p, "eye-filled", lifetech_i18n::tr!("common-look-toward-avatar"));
                 // Mark ▸ (Minimap.Mark): the avatars under the pointer
-                super::avatar_marks::submenu(ui, p, world, &avs);
+                super::avatar_marks::submenu(ui, p, world, &avs, AvatarList::MiniMap);
                 // "More…": the radar menu of the nearest avatar
                 menu::submenu(ui, p, "dots-filled", lifetech_i18n::tr!("ui-minimap-more"), can_show_names, |ui| {
-                    context::avatar_list_menu(ui, p, world, first, AvatarList::Nearby)
+                    context::avatar_list_menu(ui, p, world, first, AvatarList::MiniMap)
                 });
                 menu::separator(ui, p);
             }
@@ -896,6 +1292,30 @@ impl MiniMap {
                     lifetech_i18n::tr!("ui-minimap-banned-parcels"),
                     &mut opts.mini_collision,
                 );
+            });
+            menu::submenu(ui, p, "id-filled", lifetech_i18n::tr!("radar-opt-name-format"), true, |ui| {
+                for (label, icon, choice) in [
+                    (
+                        lifetech_i18n::tr!("radar-name-display"),
+                        "user-filled",
+                        MiniAvatarNameFormat::Display,
+                    ),
+                    (lifetech_i18n::tr!("radar-name-user"), "at", MiniAvatarNameFormat::Legacy),
+                    (
+                        lifetech_i18n::tr!("radar-name-display-user"),
+                        "id-filled",
+                        MiniAvatarNameFormat::DisplayAndLegacy,
+                    ),
+                    (
+                        lifetech_i18n::tr!("radar-name-user-display"),
+                        "user-square",
+                        MiniAvatarNameFormat::LegacyAndDisplay,
+                    ),
+                ] {
+                    if menu::check(ui, p, icon, label, opts.mini_avatar_name_format == choice, true) {
+                        opts.mini_avatar_name_format = choice;
+                    }
+                }
             });
             if menu::check(
                 ui,
@@ -1045,9 +1465,11 @@ impl MiniMap {
         Some(id)
     }
 
-    /// The mini-map's image of a region for another window (the header of
-    /// "About Land"): its map tile, else the terrain drawn from
+    /// The mini-map's image of a region for another window (the headers of
+    /// About Land and Region/Estate): its map picture, every 256 m cell
+    /// stitched (`MapTiles::region_picture`), else the terrain drawn from
     /// the heights received (no map server, or the tile is not there yet).
+    /// None under RLVa `@showworldmap` or `@showminimap` (`header_image_shown`).
     pub fn region_image(
         &mut self,
         ctx: &egui::Context,
@@ -1055,8 +1477,17 @@ impl MiniMap {
         tiles: &mut MapTiles,
         handle: RegionHandle,
     ) -> Option<egui::TextureHandle> {
+        if !header_image_shown(world) {
+            return None;
+        }
         let (ox, oy) = lifetech_net::handle_to_origin(handle);
-        if let Ok(tile) = tiles.get(1, ox / 256, oy / 256, true) {
+        let (size_x, size_y) = world
+            .regions
+            .get(&handle)
+            .map(|region| (region.heightmap.size_x, region.heightmap.size_y))
+            .unwrap_or((256, 256));
+        let (cells_x, cells_y) = super::map_tiles::region_cells(size_x, size_y);
+        if let Ok(tile) = tiles.region_picture(ox / 256, oy / 256, cells_x, cells_y) {
             return Some(tile);
         }
         let region = world.regions.get(&handle)?;
@@ -1068,6 +1499,15 @@ impl MiniMap {
     pub fn prune(&mut self, world: &World) {
         self.terrain.retain(|h, _| world.regions.contains_key(h));
     }
+}
+
+/// The map image of the About Land and Region headers, an Aurora-only
+/// picture: the Legacy Viewer's floaters have none, so the rules of the
+/// nearest pictures of the region apply, the world map's tiles
+/// (`@showworldmap`, RlvActions::canShowWorldMap) and the mini-map's
+/// (`@showminimap`, RlvActions::canShowMinimap; rlvactions.cpp).
+pub(crate) fn header_image_shown(world: &World) -> bool {
+    !world.rlva.has("showworldmap") && !world.rlva.has("showminimap")
 }
 
 /// Ground under a global position, else our own height (teleport target).
@@ -1616,5 +2056,24 @@ mod beacon_tests {
         track.pending = false;
         track.invalid = true;
         assert!(!hit.contains(hit.rect.center(), &track));
+    }
+}
+
+#[cfg(test)]
+mod rlva_header_tests {
+    use super::*;
+
+    /// The About Land and Region headers' map image follows RLVa's map
+    /// pictures: none under `@showworldmap` or `@showminimap`.
+    #[test]
+    fn map_restrictions_hide_the_header_image() {
+        let mut w = crate::world::rlva_location_tests::showloc_world();
+        assert!(header_image_shown(&w), "@showloc alone keeps it");
+        for rule in ["showworldmap", "showminimap"] {
+            w.rlva_console_input(&format!("@{rule}=n"));
+            assert!(!header_image_shown(&w), "{rule}");
+            w.rlva_console_input(&format!("@{rule}=y"));
+            assert!(header_image_shown(&w), "{rule} lifted");
+        }
     }
 }

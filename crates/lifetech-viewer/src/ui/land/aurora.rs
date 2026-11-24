@@ -159,7 +159,8 @@ fn picture(ui: &mut egui::Ui, p: &Palette, s: &mut LandUi, v: &View, parcel: &Pa
             icon_at(ui, "mountain-filled", rect.center(), 48.0, p.muted_dim);
         }
     }
-    s.texture.drop_target_slot(ui, rect, false, overview::can_change_picture(v), 1);
+    s.texture
+        .drop_target_slot_copy_transfer(ui, rect, overview::can_change_picture(v), 1);
     if overview::can_change_picture(v) {
         let slot = Rect::from_min_size(rect.right_bottom() - Vec2::splat(8.0 + 28.0), Vec2::splat(28.0));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(slot));
@@ -167,7 +168,7 @@ fn picture(ui: &mut egui::Ui, p: &Palette, s: &mut LandUi, v: &View, parcel: &Pa
         if r.on_hover_text(lifetech_i18n::tr!("ui-land-overview-change-picture")).clicked() {
             s.texture_snapshot = true;
             s.texture
-                .open(lifetech_i18n::tr!("ui-land-options-land-picture"), parcel.snapshot_id);
+                .open_copy_transfer(lifetech_i18n::tr!("ui-land-options-land-picture"), parcel.snapshot_id);
         }
     }
 }
@@ -194,7 +195,10 @@ fn owner(ui: &mut egui::Ui, p: &Palette, s: &mut LandUi, world: &mut World, parc
             (world.land.group_name(&group, &groups).unwrap_or_else(|| "…".to_owned()), None)
         } else {
             world.social.want_name(parcel.owner_id);
-            (world.social.name_of(&parcel.owner_id), Some(parcel.owner_id))
+            (
+                world.social.name_in(crate::world::names::NameScope::Roster, &parcel.owner_id),
+                Some(parcel.owner_id),
+            )
         };
         match person {
             Some(id) => {
@@ -224,7 +228,7 @@ fn owner(ui: &mut egui::Ui, p: &Palette, s: &mut LandUi, world: &mut World, parc
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
             if r.clicked() {
                 if let Some(id) = person {
-                    crate::ui::profile::request_open(ui.ctx(), id);
+                    crate::ui::profile::request_open_in(ui.ctx(), crate::world::names::NameScope::Roster, id);
                 } else if parcel.is_group_owned {
                     let group = if parcel.group_id.is_nil() {
                         parcel.owner_id

@@ -119,8 +119,12 @@ fn learned(k: &str) -> Option<String> {
 }
 
 fn key_label(k: &str) -> String {
+    key_label_on(k, cfg!(target_os = "macos"))
+}
+
+fn key_label_on(k: &str, mac: bool) -> String {
     match k {
-        "AltLeft" | "AltRight" => return "ALT".into(),
+        "AltLeft" | "AltRight" => return (if mac { "⌥ Option" } else { "ALT" }).into(),
         "ControlLeft" | "ControlRight" => return "Ctrl".into(),
         "ShiftLeft" | "ShiftRight" => return lifetech_i18n::tr!("keybinds-shift").into(),
         _ => {}
@@ -232,6 +236,27 @@ impl Binding {
             shift: false,
             alt: false,
         }
+    }
+
+    /// Whether an egui key press is this binding: the chat fields'
+    /// shortcuts (`is_chat`), read from the field's own events. The key
+    /// is compared by its physical place, as the world's bindings are
+    /// (egui names keys as winit's codes: `KeyA`, `Enter`, `ArrowUp`;
+    /// Numpad Enter arrives as Enter). The modifiers must match exactly.
+    /// Command counts as Control on macOS, as `control_down` does for a key
+    /// and as the shortcut table labels it: the Legacy Viewer's MASK_CONTROL
+    /// is Command there (LLKeyboardMacOSX::currentMask), Command+Up included
+    /// (LLChatEntry's history). A navigation key also matches by what it
+    /// does: the keypad's 8 with Num Lock off is an Up arrow. A mouse
+    /// binding never matches a key.
+    pub fn matches_egui(&self, key: egui::Key, physical: Option<egui::Key>, m: egui::Modifiers) -> bool {
+        let Input::Key(code) = &self.input else {
+            return false;
+        };
+        egui::Key::from_name(code).is_some_and(|bound| bound == physical.unwrap_or(key) || (navigation(bound) && bound == key))
+            && self.ctrl == control_down(m.ctrl, m.mac_cmd, false)
+            && self.shift == m.shift
+            && self.alt == m.alt
     }
 
     pub fn label(&self) -> String {
@@ -411,6 +436,11 @@ pub enum Action {
     PushToTalk,
     ToggleMic,
     Conversations,
+    /// Communicate › Contacts (menu_viewer.xml, "Contacts",
+    /// shortcut="control|alt|shift|F", Floater.Toggle imcontacts): the
+    /// Contacts tab of Conversations, or its torn-off window
+    /// (FSFloaterContacts::onOpen).
+    Contacts,
     /// Communicate › Nearby Chat (menu_viewer.xml, `shortcut="control|H"`,
     /// `use_mac_ctrl="true"`, Floater.ToggleOrBringToFront `fs_nearby_chat`).
     NearbyChat,
@@ -449,6 +479,10 @@ pub enum Action {
     /// Hide or show the interface (Firestorm's View › Show User Interface,
     /// Alt+Shift+U, `View.ToggleUI`).
     ToggleInterface,
+    /// The whole interface drawn or not (#4092): the Legacy Viewer's
+    /// Advanced › Rendering Features › UI, Ctrl+Alt+F1 (Ctrl+Shift+F1 on
+    /// Linux), `Advanced.ToggleFeature` "ui" (menu_viewer.xml, ToggleUI).
+    ToggleUiFeature,
     /// The world's hover tips on or off (the Legacy Viewer's Show Tips,
     /// Ctrl+Shift+T, `View.ShowHoverTips`).
     HoverTips,
@@ -507,6 +541,9 @@ pub enum Action {
     /// "Snapshot to Disk" (Firestorm Ctrl+`): a photo with the settings of
     /// the photo window, without it.
     PhotoToDisk,
+    /// The Phototools window (menu_viewer.xml `phototools_item_call`,
+    /// shortcut="alt|P").
+    Phototools,
     /// World › Environment's fixed times of day and Use Shared Environment
     /// (menu_viewer.xml: `World.EnvSettings` sunrise / noon / sunset /
     /// midnight / region, Ctrl+Shift+U / Y / N / X / J).
@@ -515,6 +552,203 @@ pub enum Action {
     EnvSunset,
     EnvMidnight,
     EnvShared,
+    /// The chat fields' own shortcuts (`ui/chat/shortcuts.rs`), read there
+    /// from the field's key events and never by the world (`is_chat`). The
+    /// Legacy Viewer hard-codes them (FSFloaterIM::handleKeyHere,
+    /// FSNearbyChatControl::handleKeyHere, LLChatEntry and
+    /// LLFloaterIMContainer::handleKeyHere, indra/newview); Aurora lets
+    /// them be rebound (human request of 2026-11-15). A line break: the
+    /// Legacy Ctrl+Shift+Enter second, Shift+Enter first.
+    ChatNewLine,
+    /// Shout in nearby chat. The Legacy Viewer's Ctrl+Enter
+    /// (FSUseCtrlShout) is not bound by default (human request of
+    /// 2026-11-15): the volume menu shouts, or a key the user sets.
+    ChatShout,
+    /// Whisper in nearby chat. The Legacy Viewer's Shift+Enter
+    /// (FSUseShiftWhisper) is the line break here: unbound by default.
+    ChatWhisper,
+    /// Send as ((OOC)) (FSUseAltOOC: Alt+Enter).
+    ChatOoc,
+    /// The sent message before / after the one shown (LLChatEntry's
+    /// Ctrl+Up / Ctrl+Down history).
+    ChatHistoryPrevious,
+    ChatHistoryNext,
+    /// The conversation below / above in the list, round it
+    /// (LLFloaterIMContainer::handleKeyHere's Alt+Down / Alt+Up, and
+    /// Ctrl+Tab / Ctrl+Shift+Tab).
+    ChatNextConversation,
+    ChatPreviousConversation,
+    /// The inventory lists' own shortcuts (`ui/inventory/shortcuts.rs`),
+    /// read there from the list's key events while it has the keyboard and
+    /// never by the world (`is_inventory`); the focused list keeps them
+    /// over the viewer's shortcuts. Aurora's: the keys of Windows Explorer
+    /// and Dolphin (#2520; rebindable by human request of 2026-11-18).
+    InvBack,
+    InvForward,
+    InvUp,
+    InvRoot,
+    InvRefresh,
+    InvEditPath,
+    InvSearch,
+    InvFilter,
+    InvPreview,
+    InvViewLarge,
+    InvViewMedium,
+    InvViewSmall,
+    InvViewCompact,
+    InvViewDetails,
+    InvViewTiles,
+    InvSelectAll,
+    InvInvertSelection,
+    InvToggleSelection,
+    InvNewFolder,
+    InvProperties,
+    InvContextMenu,
+    InvPurge,
+    /// Explorer's Ctrl+Z / Ctrl+Y on the inventory's own changes
+    /// (`world::inventory::undo`); Ctrl+Shift+Z redoes too, as Dolphin's.
+    InvUndo,
+    InvRedo,
+    /// The explorer's tabs (`ui::inventory::aurora::tabs`), as Explorer's
+    /// and Dolphin's: Ctrl+T, Ctrl+W, Ctrl+Tab and Ctrl+Shift+Tab.
+    InvNewTab,
+    InvCloseTab,
+    InvNextTab,
+    InvPreviousTab,
+}
+
+/// The inventory lists' shortcuts: matched on the list's key events and
+/// its mouse buttons (`ui::inventory::shortcuts`), never by the world's
+/// dispatch; they only conflict with each other, as the focused list keeps
+/// its chords over the world's (`app::shortcut_claims_focus`).
+pub fn is_inventory(a: Action) -> bool {
+    matches!(
+        a,
+        Action::InvBack
+            | Action::InvForward
+            | Action::InvUp
+            | Action::InvRoot
+            | Action::InvRefresh
+            | Action::InvEditPath
+            | Action::InvSearch
+            | Action::InvFilter
+            | Action::InvPreview
+            | Action::InvViewLarge
+            | Action::InvViewMedium
+            | Action::InvViewSmall
+            | Action::InvViewCompact
+            | Action::InvViewDetails
+            | Action::InvViewTiles
+            | Action::InvSelectAll
+            | Action::InvInvertSelection
+            | Action::InvToggleSelection
+            | Action::InvNewFolder
+            | Action::InvProperties
+            | Action::InvContextMenu
+            | Action::InvPurge
+            | Action::InvUndo
+            | Action::InvRedo
+            | Action::InvNewTab
+            | Action::InvCloseTab
+            | Action::InvNextTab
+            | Action::InvPreviousTab
+    )
+}
+
+/// Whether an inventory list's shortcut (`is_inventory`) may take this
+/// binding. The list reads its own key events and mouse buttons: refused
+/// are what it could never see or would see twice:
+/// - a key egui has no name for;
+/// - a mouse button, but the middle, back and forward ones for the
+///   explorer's moves (Back, Forward, Up, the top), the only ones read on
+///   the mouse (`shortcuts::mouse`);
+/// - a printable key without Ctrl or Alt: the list types it to find a
+///   name (type-ahead, `select_keys`);
+/// - the keys the list keeps fixed: the arrows, Home, End and the page keys
+///   alone (with Shift too), Ctrl+↑ / ↓ (the keyboard's place), Enter,
+///   Delete, F2, Esc and Tab alone (Shift+Tab goes back through the
+///   fields), Ctrl+C / X / V, and Backspace alone on a Mac (it deletes
+///   there);
+/// - on Windows, what egui reads as a clipboard command instead of a key
+///   (Shift+Delete, Shift+Insert, Ctrl+Insert), but Shift+Delete for Purge,
+///   which the list reads back from it (`clipboard::shortcuts`).
+pub fn inventory_accepts(action: Action, b: &Binding) -> bool {
+    inventory_accepts_on(action, b, cfg!(target_os = "macos"), cfg!(target_os = "windows"))
+}
+
+fn inventory_accepts_on(action: Action, b: &Binding, mac: bool, windows: bool) -> bool {
+    match &b.input {
+        Input::Mouse(button) => {
+            matches!(button.as_str(), "Middle" | "Back" | "Forward")
+                && matches!(action, Action::InvBack | Action::InvForward | Action::InvUp | Action::InvRoot)
+        }
+        Input::Key(name) => {
+            let Some(key) = egui::Key::from_name(name) else {
+                return false;
+            };
+            use egui::Key as E;
+            let bare = !b.ctrl && !b.alt;
+            let typed = {
+                let n = key.name();
+                n.chars().count() == 1
+                    || matches!(
+                        key,
+                        E::Space
+                            | E::Minus
+                            | E::Equals
+                            | E::OpenBracket
+                            | E::CloseBracket
+                            | E::Backslash
+                            | E::Semicolon
+                            | E::Quote
+                            | E::Comma
+                            | E::Period
+                            | E::Slash
+                            | E::Backtick
+                            | E::Plus
+                            | E::Colon
+                            | E::Pipe
+                            | E::Questionmark
+                            | E::Exclamationmark
+                    )
+            };
+            let fixed = match key {
+                // Ctrl+↑ / ↓ move the keyboard's place; on a Mac that is the
+                // Control key, and Cmd+↑ (stored as Ctrl) stays Finder's Up
+                E::ArrowUp | E::ArrowDown => bare || (!mac && b.ctrl && !b.alt && !b.shift),
+                E::ArrowLeft | E::ArrowRight | E::Home | E::End | E::PageUp | E::PageDown => bare,
+                E::Enter | E::Delete | E::F2 | E::Escape => bare && !b.shift,
+                E::Tab => bare,
+                E::C | E::X | E::V => b.ctrl && !b.alt && !b.shift,
+                E::Backspace => mac && bare && !b.shift,
+                _ => false,
+            };
+            let clipboard = windows
+                && match key {
+                    E::Delete => b.shift && !b.ctrl && !b.alt && action != Action::InvPurge,
+                    E::Insert => (b.shift || b.ctrl) && !b.alt,
+                    _ => false,
+                };
+            !fixed && !clipboard && !(bare && typed)
+        }
+    }
+}
+
+/// The chat fields' shortcuts: matched on the fields' key events
+/// (`Binding::matches_egui`), never by the world's dispatch, and they only
+/// conflict with each other.
+pub fn is_chat(a: Action) -> bool {
+    matches!(
+        a,
+        Action::ChatNewLine
+            | Action::ChatShout
+            | Action::ChatWhisper
+            | Action::ChatOoc
+            | Action::ChatHistoryPrevious
+            | Action::ChatHistoryNext
+            | Action::ChatNextConversation
+            | Action::ChatPreviousConversation
+    )
 }
 
 impl Action {
@@ -563,7 +797,8 @@ pub fn is_held(a: Action) -> bool {
     )
 }
 
-/// Actions by section, with their French labels (preferences table order).
+/// Actions by section, with their French labels (preferences table order;
+/// `ui/options/pages/shortcuts.rs` groups them in tabs by this order).
 pub fn sections() -> &'static Vec<(&'static str, Vec<(Action, &'static str)>)> {
     static TABLE: lifetech_i18n::Localized<Vec<(&'static str, Vec<(Action, &'static str)>)>> = lifetech_i18n::Localized::new();
     TABLE.get(|| {
@@ -626,10 +861,27 @@ pub fn sections() -> &'static Vec<(&'static str, Vec<(Action, &'static str)>)> {
                 ],
             ),
             (
+                lifetech_i18n::tr!("keybinds-chat-typing"),
+                vec![
+                    (Action::ChatNewLine, lifetech_i18n::tr!("keybinds-chat-new-line")),
+                    (Action::ChatShout, lifetech_i18n::tr!("keybinds-chat-shout")),
+                    (Action::ChatWhisper, lifetech_i18n::tr!("keybinds-chat-whisper")),
+                    (Action::ChatOoc, lifetech_i18n::tr!("keybinds-chat-ooc")),
+                    (Action::ChatHistoryPrevious, lifetech_i18n::tr!("keybinds-chat-history-previous")),
+                    (Action::ChatHistoryNext, lifetech_i18n::tr!("keybinds-chat-history-next")),
+                    (Action::ChatNextConversation, lifetech_i18n::tr!("keybinds-chat-next-conversation")),
+                    (
+                        Action::ChatPreviousConversation,
+                        lifetech_i18n::tr!("keybinds-chat-previous-conversation"),
+                    ),
+                ],
+            ),
+            (
                 lifetech_i18n::tr!("common-windows"),
                 vec![
                     (Action::NearbyChat, lifetech_i18n::tr!("common-nearby-chat")),
                     (Action::Conversations, lifetech_i18n::tr!("common-conversations")),
+                    (Action::Contacts, lifetech_i18n::tr!("common-contacts")),
                     (Action::People, lifetech_i18n::tr!("common-people")),
                     (Action::Friends, lifetech_i18n::tr!("common-friends")),
                     (Action::Groups, lifetech_i18n::tr!("common-groups")),
@@ -649,12 +901,48 @@ pub fn sections() -> &'static Vec<(&'static str, Vec<(Action, &'static str)>)> {
                     (Action::Performance, lifetech_i18n::tr!("common-performance")),
                     (Action::Preferences, lifetech_i18n::tr!("common-preferences")),
                     (Action::ToggleInterface, lifetech_i18n::tr!("keybinds-hide-interface")),
+                    (Action::ToggleUiFeature, lifetech_i18n::tr!("keybinds-ui-feature")),
                     (Action::HoverTips, lifetech_i18n::tr!("ui-options-hover-tips")),
                     (Action::Import, lifetech_i18n::tr!("keybinds-import-files")),
                     (Action::MuteAll, lifetech_i18n::tr!("keybinds-mute-all-sound")),
                     (Action::ContactMarkers, lifetech_i18n::tr!("ui-options-contact-markers")),
                     (Action::DoubleClickTeleport, lifetech_i18n::tr!("keybinds-double-click-teleport")),
                     (Action::Quit, lifetech_i18n::tr!("ui-bars-quit-lifetech-viewer")),
+                ],
+            ),
+            (
+                // the inventory lists' own keys (`is_inventory`), a tab of
+                // their own on the Shortcuts page
+                lifetech_i18n::tr!("common-inventory"),
+                vec![
+                    (Action::InvBack, lifetech_i18n::tr!("inventory-back")),
+                    (Action::InvForward, lifetech_i18n::tr!("inventory-forward")),
+                    (Action::InvUp, lifetech_i18n::tr!("inventory-up")),
+                    (Action::InvRoot, lifetech_i18n::tr!("keybinds-inventory-root")),
+                    (Action::InvRefresh, lifetech_i18n::tr!("ui-inventory-context-reload-folder")),
+                    (Action::InvEditPath, lifetech_i18n::tr!("inventory-path-edit")),
+                    (Action::InvSearch, lifetech_i18n::tr!("keybinds-inventory-search")),
+                    (Action::InvFilter, lifetech_i18n::tr!("keybinds-inventory-filter")),
+                    (Action::InvPreview, lifetech_i18n::tr!("keybinds-inventory-preview")),
+                    (Action::InvViewLarge, lifetech_i18n::tr!("keybinds-inventory-view-large")),
+                    (Action::InvViewMedium, lifetech_i18n::tr!("keybinds-inventory-view-medium")),
+                    (Action::InvViewSmall, lifetech_i18n::tr!("keybinds-inventory-view-small")),
+                    (Action::InvViewCompact, lifetech_i18n::tr!("keybinds-inventory-view-compact")),
+                    (Action::InvViewDetails, lifetech_i18n::tr!("keybinds-inventory-view-details")),
+                    (Action::InvViewTiles, lifetech_i18n::tr!("keybinds-inventory-view-tiles")),
+                    (Action::InvSelectAll, lifetech_i18n::tr!("common-select-all")),
+                    (Action::InvInvertSelection, lifetech_i18n::tr!("inventory-invert-selection")),
+                    (Action::InvToggleSelection, lifetech_i18n::tr!("keybinds-inventory-toggle")),
+                    (Action::InvNewFolder, lifetech_i18n::tr!("common-new-folder")),
+                    (Action::InvProperties, lifetech_i18n::tr!("common-properties")),
+                    (Action::InvContextMenu, lifetech_i18n::tr!("keybinds-inventory-menu")),
+                    (Action::InvPurge, lifetech_i18n::tr!("keybinds-inventory-purge")),
+                    (Action::InvUndo, lifetech_i18n::tr!("inventory-undo")),
+                    (Action::InvRedo, lifetech_i18n::tr!("inventory-redo")),
+                    (Action::InvNewTab, lifetech_i18n::tr!("inventory-new-tab")),
+                    (Action::InvCloseTab, lifetech_i18n::tr!("inventory-close-tab")),
+                    (Action::InvNextTab, lifetech_i18n::tr!("inventory-next-tab")),
+                    (Action::InvPreviousTab, lifetech_i18n::tr!("inventory-previous-tab")),
                 ],
             ),
             (
@@ -688,6 +976,7 @@ pub fn sections() -> &'static Vec<(&'static str, Vec<(Action, &'static str)>)> {
                 vec![
                     (Action::PhotoWindow, lifetech_i18n::tr!("keybinds-photo-window")),
                     (Action::PhotoToDisk, lifetech_i18n::tr!("keybinds-photo-to-disk")),
+                    (Action::Phototools, lifetech_i18n::tr!("toolbar-command-phototools")),
                 ],
             ),
             (
@@ -759,6 +1048,219 @@ fn kalt(code: KeyCode, ctrl: bool, shift: bool) -> Option<Binding> {
         shift,
         alt: true,
     })
+}
+
+/// The inventory lists' default keys (`is_inventory`): Windows Explorer's
+/// and Dolphin's, Finder's on a Mac (Cmd counts as Ctrl there,
+/// `control_down`; Backspace deletes there as in the Legacy Viewer, so it
+/// does not go up). The mouse's back and forward buttons go back and
+/// forward everywhere.
+fn inventory_defaults(mac: bool) -> Vec<(Action, [Option<Binding>; 2])> {
+    use KeyCode as K;
+    let mouse = |name: &str| Some(Binding::plain(Input::Mouse(name.into())));
+    vec![
+        (
+            Action::InvBack,
+            [
+                if mac {
+                    kmod(K::BracketLeft, true, false)
+                } else {
+                    kalt(K::ArrowLeft, false, false)
+                },
+                mouse("Back"),
+            ],
+        ),
+        (
+            Action::InvForward,
+            [
+                if mac {
+                    kmod(K::BracketRight, true, false)
+                } else {
+                    kalt(K::ArrowRight, false, false)
+                },
+                mouse("Forward"),
+            ],
+        ),
+        (
+            Action::InvUp,
+            if mac {
+                [kmod(K::ArrowUp, true, false), None]
+            } else {
+                [kalt(K::ArrowUp, false, false), k(K::Backspace)]
+            },
+        ),
+        // Finder: Cmd+Shift+H for the home folder (Macs mostly lack Home)
+        (
+            Action::InvRoot,
+            [
+                if mac {
+                    kmod(K::KeyH, true, true)
+                } else {
+                    kalt(K::Home, false, false)
+                },
+                None,
+            ],
+        ),
+        (Action::InvRefresh, [k(K::F5), None]),
+        (
+            Action::InvEditPath,
+            [kmod(K::KeyL, true, false), if mac { None } else { kalt(K::KeyD, false, false) }],
+        ),
+        // F3 is Mission Control on most Macs
+        (Action::InvSearch, [if mac { None } else { k(K::F3) }, None]),
+        // Windows Explorer's view keys, in its order; a Mac's Cmd+Shift+3 / 4
+        // are its screenshots: Cmd+Option there
+        (
+            Action::InvViewLarge,
+            [
+                if mac {
+                    kalt(K::Digit1, true, false)
+                } else {
+                    kmod(K::Digit1, true, true)
+                },
+                None,
+            ],
+        ),
+        (
+            Action::InvViewMedium,
+            [
+                if mac {
+                    kalt(K::Digit2, true, false)
+                } else {
+                    kmod(K::Digit2, true, true)
+                },
+                None,
+            ],
+        ),
+        (
+            Action::InvViewSmall,
+            [
+                if mac {
+                    kalt(K::Digit3, true, false)
+                } else {
+                    kmod(K::Digit3, true, true)
+                },
+                None,
+            ],
+        ),
+        (
+            Action::InvViewCompact,
+            [
+                if mac {
+                    kalt(K::Digit4, true, false)
+                } else {
+                    kmod(K::Digit4, true, true)
+                },
+                None,
+            ],
+        ),
+        (
+            Action::InvViewDetails,
+            [
+                if mac {
+                    kalt(K::Digit5, true, false)
+                } else {
+                    kmod(K::Digit5, true, true)
+                },
+                None,
+            ],
+        ),
+        (
+            Action::InvViewTiles,
+            [
+                if mac {
+                    kalt(K::Digit6, true, false)
+                } else {
+                    kmod(K::Digit6, true, true)
+                },
+                None,
+            ],
+        ),
+        // Explorer's preview pane; Finder's Show Preview on a Mac
+        (
+            Action::InvPreview,
+            [
+                if mac {
+                    kmod(K::KeyP, true, true)
+                } else {
+                    kalt(K::KeyP, false, false)
+                },
+                None,
+            ],
+        ),
+        // Dolphin's filter bar. Not Dolphin's Ctrl+I, the viewer's Inventory
+        // window (nor Ctrl+Shift+F, Friends): Ctrl+Alt+F, Cmd+Option+F on a
+        // Mac, which no viewer shortcut uses
+        (Action::InvFilter, [kalt(K::KeyF, true, false), None]),
+        (Action::InvSelectAll, [kmod(K::KeyA, true, false), None]),
+        (Action::InvInvertSelection, [kmod(K::KeyA, true, true), None]),
+        // Cmd+Space is Spotlight: no default there
+        (
+            Action::InvToggleSelection,
+            [if mac { None } else { kmod(K::Space, true, false) }, None],
+        ),
+        (Action::InvNewFolder, [kmod(K::KeyN, true, true), None]),
+        // Alt+Enter (Option+Enter on a Mac), not Finder's Get Info: Cmd+I
+        // is the Legacy Viewer's toggle of the Inventory window there, which
+        // a focused list would take
+        (Action::InvProperties, [kalt(K::Enter, false, false), None]),
+        (Action::InvContextMenu, [kmod(K::F10, false, true), None]),
+        // Finder's Delete Immediately (Cmd+Option+Backspace)
+        (
+            Action::InvPurge,
+            [
+                if mac {
+                    Some(Binding {
+                        input: Input::key(K::Backspace),
+                        ctrl: true,
+                        shift: false,
+                        alt: true,
+                    })
+                } else {
+                    kmod(K::Delete, false, true)
+                },
+                None,
+            ],
+        ),
+        // Explorer's and Finder's (Cmd+Z, Cmd+Shift+Z): Ctrl+Y, and
+        // Ctrl+Shift+Z as Dolphin and most editors
+        (Action::InvUndo, [kmod(K::KeyZ, true, false), None]),
+        (
+            Action::InvRedo,
+            if mac {
+                [kmod(K::KeyZ, true, true), None]
+            } else {
+                [kmod(K::KeyY, true, false), kmod(K::KeyZ, true, true)]
+            },
+        ),
+        // Explorer's, Dolphin's and Finder's (Cmd+T, Cmd+W; Finder and
+        // Safari go from tab to tab with Cmd+Shift+] / [, as Ctrl+Tab
+        // elsewhere)
+        (Action::InvNewTab, [kmod(K::KeyT, true, false), None]),
+        (Action::InvCloseTab, [kmod(K::KeyW, true, false), None]),
+        (
+            Action::InvNextTab,
+            [
+                if mac {
+                    kmod(K::BracketRight, true, true)
+                } else {
+                    kmod(K::Tab, true, false)
+                },
+                None,
+            ],
+        ),
+        (
+            Action::InvPreviousTab,
+            [
+                if mac {
+                    kmod(K::BracketLeft, true, true)
+                } else {
+                    kmod(K::Tab, true, true)
+                },
+                None,
+            ],
+        ),
+    ]
 }
 
 impl Default for KeyBindings {
@@ -867,6 +1369,8 @@ impl KeyBindings {
             (Action::PushToTalk, [Some(Binding::plain(Input::Mouse("Middle".into()))), None]),
             (Action::ToggleMic, [None, None]),
             (Action::Conversations, [kmod(K::KeyT, true, false), None]),
+            // menu_viewer.xml: Contacts, shortcut="control|alt|shift|F"
+            (Action::Contacts, [kalt(K::KeyF, true, true), None]),
             (Action::People, [kmod(K::KeyA, true, true), None]),
             // menu_viewer.xml: Friends, Groups, Contact Sets
             (Action::Friends, [kmod(K::KeyF, true, true), None]),
@@ -914,6 +1418,20 @@ impl KeyBindings {
             (Action::Preferences, [kmod(K::KeyP, true, false), None]),
             // menu_viewer.xml: Show User Interface, shortcut="alt|shift|U"
             (Action::ToggleInterface, [kalt(K::KeyU, false, true), None]),
+            // menu_viewer.xml: Rendering Features › UI, shortcut="control|alt|F1",
+            // shortcut_linux="control|shift|F1" (the desktops of Linux take
+            // Ctrl+Alt+F1 to switch consoles)
+            (
+                Action::ToggleUiFeature,
+                [
+                    if cfg!(target_os = "linux") {
+                        kmod(K::F1, true, true)
+                    } else {
+                        kalt(K::F1, true, false)
+                    },
+                    None,
+                ],
+            ),
             // menu_viewer.xml: Show Tips, shortcut="control|shift|T"
             (Action::HoverTips, [kmod(K::KeyT, true, true), None]),
             (Action::Import, [kmod(K::KeyU, true, false), None]),
@@ -1022,14 +1540,34 @@ impl KeyBindings {
             (Action::RefreshAttachments, [kalt(K::KeyR, false, true), None]),
             (Action::PhotoWindow, [kmod(K::KeyS, true, true), None]),
             (Action::PhotoToDisk, [kmod(K::Backquote, true, false), None]),
+            (Action::Phototools, [kalt(K::KeyP, false, false), None]),
             // menu_viewer.xml: World › Environment
             (Action::EnvSunrise, [kmod(K::KeyU, true, true), None]),
             (Action::EnvMidday, [kmod(K::KeyY, true, true), None]),
             (Action::EnvSunset, [kmod(K::KeyN, true, true), None]),
             (Action::EnvMidnight, [kmod(K::KeyX, true, true), None]),
             (Action::EnvShared, [kmod(K::KeyJ, true, true), None]),
+            // the chat fields' (`is_chat`): the defaults the human chose on
+            // 2026-11-15. Send (Enter), Close (Ctrl+W) and Find (Ctrl+F)
+            // stay fixed.
+            (Action::ChatNewLine, [kmod(K::Enter, false, true), kmod(K::Enter, true, true)]),
+            (Action::ChatShout, [None, None]),
+            (Action::ChatWhisper, [None, None]),
+            (Action::ChatOoc, [kalt(K::Enter, false, false), None]),
+            (Action::ChatHistoryPrevious, [kmod(K::ArrowUp, true, false), None]),
+            (Action::ChatHistoryNext, [kmod(K::ArrowDown, true, false), None]),
+            (
+                Action::ChatNextConversation,
+                [kmod(K::Tab, true, false), kalt(K::ArrowDown, false, false)],
+            ),
+            (
+                Action::ChatPreviousConversation,
+                [kmod(K::Tab, true, true), kalt(K::ArrowUp, false, false)],
+            ),
         ];
-        KeyBindings { map: defaults }
+        let mut map = defaults;
+        map.extend(inventory_defaults(cfg!(target_os = "macos")));
+        KeyBindings { map }
     }
 }
 
@@ -1044,6 +1582,78 @@ pub fn is_text_edit_key(code: KeyCode) -> bool {
     };
     let shifted = Mods { shift: true, ..ctrl };
     text_field_keeps(code, ctrl) || text_field_keeps(code, shifted)
+}
+
+/// Whether a chat field's shortcut (`is_chat`) may take this binding. The
+/// field reads its own key events, so refused are only what it could never
+/// see: a mouse button, a key egui has no name for (it never arrives as
+/// one), and the fixed Send (Enter), Close (Ctrl+W) and Find (Ctrl+F),
+/// taken before the field. Any other key is the user's choice, a plain
+/// letter included.
+pub fn chat_accepts(b: &Binding) -> bool {
+    let Input::Key(name) = &b.input else {
+        return false;
+    };
+    let Some(key) = egui::Key::from_name(name) else {
+        return false;
+    };
+    let fixed = match key {
+        egui::Key::Enter => !b.ctrl && !b.alt && !b.shift,
+        egui::Key::W | egui::Key::F => b.ctrl && !b.alt && !b.shift,
+        _ => false,
+    };
+    !fixed
+}
+
+/// Keys that move or edit rather than type: the keypad sends them with
+/// Num Lock off, from another physical place.
+fn navigation(key: egui::Key) -> bool {
+    use egui::Key as E;
+    matches!(
+        key,
+        E::ArrowUp
+            | E::ArrowDown
+            | E::ArrowLeft
+            | E::ArrowRight
+            | E::Home
+            | E::End
+            | E::PageUp
+            | E::PageDown
+            | E::Insert
+            | E::Delete
+            | E::Enter
+    )
+}
+
+/// Whether a focused text field keeps this binding's chord on every
+/// keyboard layout (`text_field_keeps`), so that a world shortcut on it
+/// never runs while typing. A letter is judged by the character it types
+/// at that moment (`text_field_keeps_key`): Ctrl + the Q place selects all
+/// on AZERTY but quits on QWERTY, so a letter is never counted as kept.
+fn kept_on_every_layout(b: &Binding) -> bool {
+    use KeyCode as K;
+    let Input::Key(name) = &b.input else {
+        return false;
+    };
+    let code = match name.as_str() {
+        "ArrowLeft" => K::ArrowLeft,
+        "ArrowRight" => K::ArrowRight,
+        "ArrowUp" => K::ArrowUp,
+        "ArrowDown" => K::ArrowDown,
+        "Home" => K::Home,
+        "End" => K::End,
+        "Backspace" => K::Backspace,
+        "Delete" => K::Delete,
+        _ => return false,
+    };
+    text_field_keeps(
+        code,
+        Mods {
+            ctrl: b.ctrl,
+            shift: b.shift,
+            alt: b.alt,
+        },
+    )
 }
 
 /// Chords a focused text field keeps. Menu accelerators match the mask
@@ -1283,11 +1893,24 @@ impl EditHistory {
     }
 }
 
-/// The same logical letters/punctuation and non-Latin physical fallback as
-/// egui-winit, restricted to keys used by the fixed editing accelerators.
+/// Logical letters and punctuation used by the fixed editing accelerators,
+/// with the same non-Latin physical fallback as egui-winit. The number row
+/// and numpad 1–5 follow the key position instead. The Legacy Viewer's
+/// LLKeyboardWin32 constructor (indra/llwindow/llkeyboardwin32.cpp) maps
+/// `'0'..'9'` and numpad `0x60..0x69` by virtual key, and menu_viewer.xml
+/// binds the build tools to `control|1` through `control|5`. A French
+/// AZERTY layout types `'` on the 4 key; that character must not hide Create.
 pub fn native_shortcut_key(key: &winit::keyboard::Key, code: KeyCode) -> Option<egui::Key> {
     use egui::Key as E;
     use winit::keyboard::{Key, KeyCode as K, NamedKey};
+    match code {
+        K::Digit1 | K::Numpad1 => return Some(E::Num1),
+        K::Digit2 | K::Numpad2 => return Some(E::Num2),
+        K::Digit3 | K::Numpad3 => return Some(E::Num3),
+        K::Digit4 | K::Numpad4 => return Some(E::Num4),
+        K::Digit5 | K::Numpad5 => return Some(E::Num5),
+        _ => {}
+    }
     let logical = match key {
         Key::Character(letter) => E::from_name(letter),
         Key::Named(NamedKey::Escape) => Some(E::Escape),
@@ -1305,11 +1928,6 @@ pub fn native_shortcut_key(key: &winit::keyboard::Key, code: KeyCode) -> Option<
         K::KeyX => Some(E::X),
         K::KeyZ => Some(E::Z),
         K::KeyY => Some(E::Y),
-        K::Digit1 | K::Numpad1 => Some(E::Num1),
-        K::Digit2 | K::Numpad2 => Some(E::Num2),
-        K::Digit3 | K::Numpad3 => Some(E::Num3),
-        K::Digit4 | K::Numpad4 => Some(E::Num4),
-        K::Digit5 | K::Numpad5 => Some(E::Num5),
         K::Period | K::NumpadDecimal => Some(E::Period),
         K::Comma => Some(E::Comma),
         K::Escape => Some(E::Escape),
@@ -1354,7 +1972,7 @@ impl KeyBindings {
                 // a new action's default key may already be the user's own
                 // choice for another action (Space for jumping): theirs stays
                 for slot in &mut b {
-                    if slot.as_ref().is_some_and(|d| !self.users(d).is_empty()) {
+                    if slot.as_ref().is_some_and(|d| !self.rivals(a, d).is_empty()) {
                         *slot = None;
                     }
                 }
@@ -1399,15 +2017,47 @@ impl KeyBindings {
     fn follow_letters_of(&mut self, layout: &layout::KeyboardLayout) {
         let before = Self::us_places(layout.movement_keys());
         let after = Self::for_layout(layout);
+        // the defaults still in place that move: (action, slot, old, new)
+        let mut moves: Vec<(Action, usize, Binding, Binding)> = Vec::new();
         for ((action, old), (_, new)) in before.map.iter().zip(&after.map) {
             for slot in 0..2 {
-                let (Some(old), Some(new)) = (&old[slot], &new[slot]) else {
-                    continue;
-                };
-                if old == new || self.get(*action)[slot].as_ref() != Some(old) || self.users(new).iter().any(|a| a != action) {
-                    continue;
+                if let (Some(old), Some(new)) = (&old[slot], &new[slot])
+                    && old != new
+                    && self.get(*action)[slot].as_ref() == Some(old)
+                {
+                    moves.push((*action, slot, old.clone(), new.clone()));
                 }
-                self.set(*action, slot, Some(new.clone()));
+            }
+        }
+        // A move is refused while its new key is someone else's, unless that
+        // someone moves away from it too: two defaults that swap letters
+        // (AZERTY's Z and W: the inventory's Undo and Close tab) move
+        // together. Refused moves keep their key, which may refuse others.
+        let rivals: Vec<Vec<Action>> = moves.iter().map(|(action, _, _, new)| self.rivals(*action, new)).collect();
+        let mut allowed = vec![true; moves.len()];
+        loop {
+            let next: Vec<bool> = rivals
+                .iter()
+                .zip(&moves)
+                .enumerate()
+                .map(|(n, (rivals, (_, _, _, new)))| {
+                    allowed[n]
+                        && rivals.iter().all(|rival| {
+                            moves
+                                .iter()
+                                .zip(&allowed)
+                                .any(|((action, _, old, _), ok)| *ok && action == rival && old == new)
+                        })
+                })
+                .collect();
+            if next == allowed {
+                break;
+            }
+            allowed = next;
+        }
+        for ((action, slot, _, new), ok) in moves.into_iter().zip(allowed) {
+            if ok {
+                self.set(action, slot, Some(new));
             }
         }
     }
@@ -1447,6 +2097,29 @@ impl KeyBindings {
             .collect()
     }
 
+    /// The other actions using this binding that it conflicts with. A chat
+    /// field's shortcut (`is_chat`) and a world's meet only on a Ctrl / Alt
+    /// chord the field does not keep on every layout
+    /// (`kept_on_every_layout`): the world's runs first while typing
+    /// (`shortcut_while_typing` in app.rs, as the Legacy Viewer's menu
+    /// accelerators go before the focused field), so the chat's would
+    /// never be seen.
+    pub fn rivals(&self, a: Action, b: &Binding) -> Vec<Action> {
+        let meet_while_typing = (b.ctrl || b.alt) && !kept_on_every_layout(b);
+        self.users(b)
+            .into_iter()
+            .filter(|x| {
+                *x != a
+                    && match (is_inventory(*x), is_inventory(a)) {
+                        (true, true) => true,
+                        (false, false) => is_chat(*x) == is_chat(a) || meet_while_typing,
+                        // the focused list keeps its keys: no meeting
+                        _ => false,
+                    }
+            })
+            .collect()
+    }
+
     /// Is a held action active? A binding needs its modifiers and accepts
     /// more (Shift makes arrows strafe in SL), but the held binding of the
     /// same key with the most matching modifiers wins (LLViewerInput::scanKey:
@@ -1481,6 +2154,8 @@ impl KeyBindings {
     pub fn triggered(&self, input: &Input, m: Mods) -> Option<Action> {
         let exact = self.map.iter().find(|(a, bs)| {
             !is_held(*a)
+                && !is_chat(*a)
+                && !is_inventory(*a)
                 && bs
                     .iter()
                     .flatten()
@@ -1494,7 +2169,12 @@ impl KeyBindings {
         }
         self.map
             .iter()
-            .find(|(a, bs)| !is_held(*a) && bs.iter().flatten().any(|b| &b.input == input && !b.ctrl && !b.alt && !b.shift))
+            .find(|(a, bs)| {
+                !is_held(*a)
+                    && !is_chat(*a)
+                    && !is_inventory(*a)
+                    && bs.iter().flatten().any(|b| &b.input == input && !b.ctrl && !b.alt && !b.shift)
+            })
             .map(|(a, _)| *a)
     }
 
@@ -1526,7 +2206,11 @@ impl KeyBindings {
                 .flatten()
                 .any(|b| &b.input == input && !b.ctrl && !b.alt && !b.shift)
             && !self.map.iter().any(|(a, bs)| {
-                *a != Action::Up && *a != Action::HudDrag && bs.iter().flatten().any(|b| &b.input == input && b.ctrl && !b.alt && !b.shift)
+                *a != Action::Up
+                    && *a != Action::HudDrag
+                    && !is_chat(*a)
+                    && !is_inventory(*a)
+                    && bs.iter().flatten().any(|b| &b.input == input && b.ctrl && !b.alt && !b.shift)
             })
     }
 
@@ -1558,6 +2242,22 @@ impl KeyBindings {
 mod tests {
     use super::*;
     use crate::build::ui::Shortcut;
+
+    /// The key that carries, on this PC's layout, the letter `us_key` has on
+    /// US QWERTY. `KeyBindings::default` and `sanitized` follow the PC's
+    /// layout: a test that reads their letter shortcuts names the keys
+    /// through here (Ctrl+Q is KeyA on AZERTY, Ctrl+H is KeyJ on Dvorak).
+    fn letter(us_key: KeyCode) -> KeyCode {
+        layout::current().named_key(us_key)
+    }
+
+    #[test]
+    fn standalone_alt_keys_use_platform_labels() {
+        for key in ["AltLeft", "AltRight"] {
+            assert_eq!(key_label_on(key, true), "⌥ Option");
+            assert_eq!(key_label_on(key, false), "ALT");
+        }
+    }
 
     /// LLKeyboard names KEY_HOME "Home" (indra/llwindow/llkeyboard.cpp).
     /// French keyboards print Début. Japanese keyboards print Home.
@@ -1827,14 +2527,15 @@ mod tests {
             let mut kb = kb.sanitized();
             assert_eq!(kb.get(action), [None, None]);
             assert_eq!(kb.get(Action::CamPanUp)[0], defaults[0]);
-            let binding = kalt(KeyCode::KeyB, false, false);
+            let b = letter(KeyCode::KeyB);
+            let binding = kalt(b, false, false);
             kb.set(action, 1, binding.clone());
             let saved = serde_json::to_string(&kb).expect("save bindings");
             let mut kb = serde_json::from_str::<KeyBindings>(&saved).expect("restore bindings").sanitized();
             assert_eq!(kb.get(action), [None, binding]);
             assert!(kb.held(
                 action,
-                &HashSet::from([Input::key(KeyCode::KeyB)]),
+                &HashSet::from([Input::key(b)]),
                 Mods {
                     alt: true,
                     ..Default::default()
@@ -1851,18 +2552,19 @@ mod tests {
             ctrl: true,
             ..Default::default()
         };
-        let input = Input::key(KeyCode::KeyU);
+        let input = Input::key(letter(KeyCode::KeyU));
+        let j = letter(KeyCode::KeyJ);
         let mut bindings = KeyBindings::default();
         assert_eq!(bindings.triggered(&input, ctrl), Some(Action::Import));
         assert_eq!(bindings.triggered(&input, Mods::default()), None);
         bindings.map.retain(|(action, _)| *action != Action::Import);
         let mut bindings = bindings.sanitized();
         assert_eq!(bindings.triggered(&input, ctrl), Some(Action::Import));
-        bindings.set(Action::Import, 0, kmod(KeyCode::KeyJ, true, false));
+        bindings.set(Action::Import, 0, kmod(j, true, false));
         let saved = serde_json::to_string(&bindings).expect("save bindings");
         let mut restored = serde_json::from_str::<KeyBindings>(&saved).expect("restore bindings").sanitized();
         assert_eq!(restored.triggered(&input, ctrl), None);
-        assert_eq!(restored.triggered(&Input::key(KeyCode::KeyJ), ctrl), Some(Action::Import));
+        assert_eq!(restored.triggered(&Input::key(j), ctrl), Some(Action::Import));
         restored.set(Action::Import, 0, None);
         assert_eq!(restored.sanitized().get(Action::Import), [None, None]);
     }
@@ -1902,6 +2604,7 @@ mod tests {
             (KeyCode::KeyQ, m(true, false, false), Action::Quit),
             (KeyCode::KeyO, m(true, false, false), Action::Appearance),
             (KeyCode::KeyF, m(true, true, false), Action::Friends),
+            (KeyCode::KeyF, m(true, true, true), Action::Contacts),
             (KeyCode::KeyG, m(true, true, false), Action::Groups),
             (KeyCode::KeyC, m(true, true, true), Action::ContactSets),
             (KeyCode::KeyI, m(true, true, false), Action::NewInventoryWindow),
@@ -1926,12 +2629,15 @@ mod tests {
             Some(Action::ResetCamera)
         );
         // a settings file from before them gets them, on the keys of the
-        // active layout (`KeyBindings::default`: Ctrl+Q is KeyA on AZERTY)
-        let mut old = kb.clone();
+        // active layout (`KeyBindings::default`: Ctrl+Q is KeyA on AZERTY).
+        // The file is one of that layout too: in a file of US places, a
+        // letter landing on a key the file already uses would be dropped
+        // (`sanitized`)
+        let defaults = KeyBindings::default();
+        let mut old = defaults.clone();
         old.map
             .retain(|(a, _)| !matches!(a, Action::Quit | Action::Friends | Action::ResetCameraAngles));
         let old = old.sanitized();
-        let defaults = KeyBindings::default();
         for action in [Action::Quit, Action::Friends, Action::ResetCameraAngles] {
             assert!(old.get(action)[0].is_some(), "{action:?} bound");
             assert_eq!(old.get(action), defaults.get(action), "{action:?}");
@@ -1945,7 +2651,7 @@ mod tests {
     #[test]
     fn nearby_chat_is_ctrl_h_and_keeps_the_other_h_chords() {
         let kb = KeyBindings::default();
-        let h = Input::key(KeyCode::KeyH);
+        let h = Input::key(letter(KeyCode::KeyH));
         let ctrl = Mods {
             ctrl: true,
             ..Default::default()
@@ -1972,8 +2678,12 @@ mod tests {
         assert_eq!(kb.triggered(&h, shift), Some(Action::ZoomSelection));
         assert!(!text_field_keeps(KeyCode::KeyH, ctrl), "Nearby Chat runs while a field is focused");
         let binding = kb.get(Action::NearbyChat)[0].clone().expect("default binding");
-        assert_eq!(binding.label_on(true), "⌃H");
         assert_eq!(binding.label_on(false), "Ctrl+H");
+        // the Mac's Control label goes by the key's place (`uses_mac_control`),
+        // on the US places macOS keeps; the key reads as on this PC's layout
+        let mac = KeyBindings::us_places([KeyCode::KeyW, KeyCode::KeyS, KeyCode::KeyA, KeyCode::KeyD]);
+        let mac = mac.get(Action::NearbyChat)[0].clone().expect("default binding");
+        assert_eq!(mac.label_on(true), format!("⌃{}", Input::key(KeyCode::KeyH).label()));
         let mut old = kb;
         old.map.retain(|(action, _)| *action != Action::NearbyChat);
         assert_eq!(old.sanitized().triggered(&h, ctrl), Some(Action::NearbyChat));
@@ -2126,8 +2836,9 @@ mod tests {
             ctrl: true,
             ..Default::default()
         };
-        kb.set(Action::HudDrag, 1, Some(Binding::captured(Input::key(KeyCode::KeyB), ctrl)));
-        let down = [Input::key(KeyCode::KeyB)].into_iter().collect();
+        let b = Input::key(letter(KeyCode::KeyB));
+        kb.set(Action::HudDrag, 1, Some(Binding::captured(b.clone(), ctrl)));
+        let down = [b.clone()].into_iter().collect();
         assert!(kb.held(
             Action::HudDrag,
             &HashSet::new(),
@@ -2136,18 +2847,46 @@ mod tests {
                 ..Default::default()
             }
         ));
-        assert!(kb.uses_input(Action::HudDrag, &Input::key(KeyCode::KeyB)));
+        assert!(kb.uses_input(Action::HudDrag, &b));
         assert!(kb.held(Action::HudDrag, &down, ctrl));
         assert!(!kb.held(Action::HudDrag, &down, Mods::default()));
-        assert_eq!(kb.triggered(&Input::key(KeyCode::KeyB), ctrl), None);
+        assert_eq!(kb.triggered(&b, ctrl), None);
         kb.set(Action::HudDrag, 0, None);
         kb.set(Action::HudDrag, 1, None);
         assert!(!kb.sanitized().held(Action::HudDrag, &down, Mods { alt: true, ..ctrl }));
     }
 
     #[test]
+    fn a_chat_shortcut_takes_only_keys_its_field_can_see() {
+        let key = |code: KeyCode, ctrl: bool, shift: bool, alt: bool| Binding::captured(Input::key(code), Mods { ctrl, shift, alt });
+        let accepts = |b: Binding| chat_accepts(&b);
+        // the chosen defaults, a function key, Ctrl / Alt chords
+        assert!(accepts(key(KeyCode::Enter, false, true, false)));
+        assert!(accepts(key(KeyCode::Enter, true, true, false)));
+        assert!(accepts(key(KeyCode::Enter, false, false, true)));
+        assert!(accepts(key(KeyCode::ArrowUp, true, false, false)));
+        assert!(accepts(key(KeyCode::Tab, true, false, false)));
+        assert!(accepts(key(KeyCode::F5, false, false, false)));
+        assert!(accepts(key(KeyCode::KeyP, true, false, false)));
+        // a mouse button, a key egui does not name
+        assert!(!chat_accepts(&Binding::captured(Input::Mouse("Middle".into()), Mods::default())));
+        assert!(!accepts(key(KeyCode::NumpadMultiply, true, false, false)));
+        // the fixed Send, Close and Find
+        assert!(!accepts(key(KeyCode::Enter, false, false, false)));
+        assert!(!accepts(key(KeyCode::KeyW, true, false, false)));
+        assert!(!accepts(key(KeyCode::KeyF, true, false, false)));
+        // any other key is the user's choice, a plain letter included
+        for code in [KeyCode::KeyW, KeyCode::Digit1, KeyCode::Space, KeyCode::ArrowUp] {
+            assert!(accepts(key(code, false, false, false)), "{code:?}");
+        }
+    }
+
+    #[test]
     fn hud_shortcuts_warn_of_conflicts_without_suppressing_other_held_actions() {
-        let mut kb = KeyBindings::default();
+        // A fixed layout, not the PC's: the letter shortcuts follow the
+        // active layout (Quit is Ctrl + the Q letter, the physical A on
+        // AZERTY), so `default()` would give another map on every keyboard.
+        let mut kb = KeyBindings::for_layout(&layout::KeyboardLayout::wasd());
         let ctrl = Mods {
             ctrl: true,
             ..Default::default()
@@ -2156,7 +2895,32 @@ mod tests {
         let b = Binding::captured(input.clone(), ctrl);
         kb.set(Action::HudDrag, 0, Some(b.clone()));
         kb.set(Action::PushToTalk, 1, Some(b.clone()));
-        assert_eq!(kb.users(&b), vec![Action::PushToTalk, Action::HudDrag]);
+        assert_eq!(kb.rivals(Action::HudDrag, &b), vec![Action::PushToTalk]);
+        // the chat's Ctrl+Up (sent messages) is no conflict: it is the chat
+        // field's alone (`is_chat`)
+        assert!(kb.users(&b).contains(&Action::ChatHistoryPrevious));
+        assert!(kb.rivals(Action::ChatHistoryPrevious, &b).is_empty());
+        // but a chat key on a world chord that runs while typing is one: the
+        // world's would take the key first (Ctrl+P, Preferences)
+        let ctrl_p = Binding::captured(Input::key(KeyCode::KeyP), ctrl);
+        kb.set(Action::ChatWhisper, 0, Some(ctrl_p.clone()));
+        assert_eq!(kb.rivals(Action::ChatWhisper, &ctrl_p), vec![Action::Preferences]);
+        assert!(kb.rivals(Action::Preferences, &ctrl_p).contains(&Action::ChatWhisper));
+        // a letter too, even one a field keeps on some layout: Ctrl + the Q
+        // place selects all on AZERTY but quits on QWERTY
+        // (`text_field_keeps_key` judges the letter typed); Quit sits on the
+        // Q letter's place of each layout
+        for layout in [layout::KeyboardLayout::wasd(), layout::KeyboardLayout::zqsd()] {
+            let mut kb = KeyBindings::for_layout(&layout);
+            let ctrl_q = Binding::captured(Input::key(layout.named_key(KeyCode::KeyQ)), ctrl);
+            kb.set(Action::ChatWhisper, 0, Some(ctrl_q.clone()));
+            assert_eq!(kb.rivals(Action::ChatWhisper, &ctrl_q), vec![Action::Quit], "{ctrl_q:?}");
+        }
+        // a plain key never meets: the world's do not run while typing
+        let f5 = Binding::captured(Input::key(KeyCode::F5), Mods::default());
+        kb.set(Action::ChatWhisper, 0, Some(f5.clone()));
+        kb.set(Action::Fly, 1, Some(f5.clone()));
+        assert!(kb.rivals(Action::ChatWhisper, &f5).is_empty());
         let down = [input].into_iter().collect();
         assert!(kb.held(Action::HudDrag, &down, ctrl));
         assert!(kb.held(Action::PushToTalk, &down, ctrl));
@@ -2327,12 +3091,94 @@ mod tests {
         assert_eq!(kb.sanitized().get(Action::LensZoomIn)[0], None);
     }
 
+    /// The inventory's commands share chords with the world's shortcuts
+    /// without conflicting with them, and the keys the list keeps are
+    /// refused.
+    #[test]
+    fn inventory_keys_only_meet_each_other() {
+        let kb = KeyBindings::default();
+        // People and Invert selection, the sunset and New folder
+        for (world, list) in [
+            (Action::People, Action::InvInvertSelection),
+            (Action::EnvSunset, Action::InvNewFolder),
+        ] {
+            let b = kb.get(list)[0].clone().expect("default binding");
+            assert!(kb.users(&b).contains(&world));
+            assert!(!kb.rivals(list, &b).contains(&world));
+            assert!(!kb.rivals(world, &b).contains(&list));
+        }
+        // never dispatched by the world
+        let ctrl_shift = Mods {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        };
+        let a = kb.get(Action::InvInvertSelection)[0].clone().expect("default binding");
+        assert_ne!(kb.triggered(&a.input, ctrl_shift), Some(Action::InvInvertSelection));
+        // two inventory commands on one key do conflict
+        let mut kb = kb;
+        kb.set(Action::InvRefresh, 0, Some(a.clone()));
+        assert!(kb.rivals(Action::InvRefresh, &a).contains(&Action::InvInvertSelection));
+        // keys the list keeps fixed, or types, are refused, its others accepted
+        let with = |code, ctrl: bool, shift: bool, alt: bool| Binding::captured(Input::key(code), Mods { ctrl, shift, alt });
+        let plain = |code| with(code, false, false, false);
+        let ok = |a: Action, b: &Binding| inventory_accepts_on(a, b, false, false);
+        let refresh = Action::InvRefresh;
+        assert!(!ok(refresh, &plain(KeyCode::Enter)));
+        assert!(!ok(refresh, &plain(KeyCode::ArrowDown)));
+        assert!(
+            !ok(refresh, &with(KeyCode::ArrowDown, true, false, false)),
+            "Ctrl+Down moves the keyboard's place"
+        );
+        assert!(
+            !ok(refresh, &with(KeyCode::Tab, false, true, false)),
+            "Shift+Tab goes back through the fields"
+        );
+        assert!(!ok(refresh, &plain(KeyCode::KeyR)), "a letter alone is type-ahead");
+        assert!(!ok(refresh, &with(KeyCode::KeyR, false, true, false)));
+        assert!(!ok(refresh, &plain(KeyCode::Space)));
+        assert!(ok(refresh, &with(KeyCode::KeyR, true, false, false)));
+        assert!(ok(refresh, &plain(KeyCode::F6)));
+        // Backspace deletes on a Mac
+        assert!(ok(Action::InvUp, &plain(KeyCode::Backspace)));
+        assert!(!inventory_accepts_on(Action::InvUp, &plain(KeyCode::Backspace), true, false));
+        // egui's clipboard chords on Windows, Shift+Delete for Purge only
+        let shift_delete = with(KeyCode::Delete, false, true, false);
+        assert!(inventory_accepts_on(Action::InvPurge, &shift_delete, false, true));
+        assert!(!inventory_accepts_on(refresh, &shift_delete, false, true));
+        assert!(!inventory_accepts_on(
+            refresh,
+            &with(KeyCode::Insert, true, false, false),
+            false,
+            true
+        ));
+        // mouse buttons for the explorer's moves only
+        let back = Binding::captured(Input::Mouse("Back".into()), Mods::default());
+        assert!(ok(Action::InvBack, &back));
+        assert!(!ok(Action::InvSelectAll, &back));
+        assert!(!ok(
+            Action::InvBack,
+            &Binding::captured(Input::Mouse("Other8".into()), Mods::default())
+        ));
+        // every default is one the list takes, and none is the Inventory
+        // window's toggle (Ctrl+I, Cmd+I on a Mac): a focused list would
+        // keep it from closing the window
+        let toggle = kmod(KeyCode::KeyI, true, false).expect("binding");
+        for mac in [false, true] {
+            for (a, bindings) in inventory_defaults(mac) {
+                for b in bindings.iter().flatten() {
+                    assert!(inventory_accepts_on(a, b, mac, !mac), "{a:?} {b:?} mac={mac}");
+                    assert_ne!(*b, toggle, "{a:?} mac={mac}");
+                }
+            }
+        }
+    }
+
     /// World › Environment's shortcuts (menu_viewer.xml): Ctrl+Shift+U / Y /
     /// N / X / J, added to older settings files and rebindable.
     #[test]
     fn environment_shortcuts_pick_the_legacy_times_of_day() {
-        let layout = layout::current();
-        let mut kb = KeyBindings::us_places(layout.movement_keys());
+        let mut kb = KeyBindings::default();
         kb.map.retain(|(a, _)| a.time_of_day().is_none());
         let mut kb = kb.sanitized();
         let ctrl_shift = Mods {
@@ -2347,9 +3193,14 @@ mod tests {
             (KeyCode::KeyX, Action::EnvMidnight, 4),
             (KeyCode::KeyJ, Action::EnvShared, 0),
         ] {
-            let code = layout.named_key(us_code);
+            let code = letter(us_code);
             assert_eq!(kb.triggered(&Input::key(code), ctrl_shift), Some(action), "{code:?}");
-            assert_eq!(kb.users(&kb.get(action)[0].clone().expect("default binding")), [action]);
+            let binding = kb.get(action)[0].clone().expect("default binding");
+            // the inventory list's own Ctrl+Shift+N (New folder) shares the
+            // chord without a conflict: the focused list keeps it
+            let world: Vec<Action> = kb.users(&binding).into_iter().filter(|a| !is_inventory(*a)).collect();
+            assert_eq!(world, [action]);
+            assert!(kb.rivals(action, &binding).is_empty());
             assert_eq!(action.time_of_day(), Some(time));
         }
         assert_eq!(Action::Fly.time_of_day(), None);
@@ -2374,14 +3225,15 @@ mod tests {
             ctrl: true,
             ..Default::default()
         };
-        assert_eq!(keys.triggered(&Input::key(KeyCode::KeyK), ctrl), Some(Action::IkEdit));
-        assert_eq!(keys.triggered(&Input::key(KeyCode::KeyK), Mods::default()), None);
-        keys.set(Action::IkEdit, 0, kmod(KeyCode::KeyJ, true, false));
+        let (ik, j) = (Input::key(letter(KeyCode::KeyK)), letter(KeyCode::KeyJ));
+        assert_eq!(keys.triggered(&ik, ctrl), Some(Action::IkEdit));
+        assert_eq!(keys.triggered(&ik, Mods::default()), None);
+        keys.set(Action::IkEdit, 0, kmod(j, true, false));
         let mut keys = keys.sanitized();
-        assert_eq!(keys.triggered(&Input::key(KeyCode::KeyK), ctrl), None);
-        assert_eq!(keys.triggered(&Input::key(KeyCode::KeyJ), ctrl), Some(Action::IkEdit));
+        assert_eq!(keys.triggered(&ik, ctrl), None);
+        assert_eq!(keys.triggered(&Input::key(j), ctrl), Some(Action::IkEdit));
         keys.set(Action::IkEdit, 0, None);
-        assert_eq!(keys.sanitized().triggered(&Input::key(KeyCode::KeyJ), ctrl), None);
+        assert_eq!(keys.sanitized().triggered(&Input::key(j), ctrl), None);
     }
 
     #[test]
@@ -2480,6 +3332,7 @@ mod tests {
             (Action::ResyncAnimations, (true, false, false), [K::KeyS; 4]),
             (Action::RefreshAttachments, (false, true, true), [K::KeyR; 4]),
             (Action::PhotoWindow, (true, true, false), [K::KeyS; 4]),
+            (Action::Phototools, (false, false, true), [K::KeyP; 4]),
             (Action::SitGround, (false, true, true), [K::KeyS; 4]),
             (Action::EnvSunrise, (true, true, false), [K::KeyU; 4]),
             (Action::EnvMidday, (true, true, false), [K::KeyY, K::KeyY, K::KeyY, K::KeyZ]),
@@ -2509,10 +3362,11 @@ mod tests {
             ] {
                 assert_eq!(kb.get(action)[1], k(key), "{action:?} on layout {i}");
             }
-            // and no default steals another's key
+            // and no default steals another's key (the chat fields' keys
+            // only meet each other: `is_chat`)
             for (action, binds) in &kb.map {
                 for b in binds.iter().flatten() {
-                    assert_eq!(kb.users(b), vec![*action], "{b:?} on layout {i}");
+                    assert_eq!(kb.rivals(*action, b), Vec::<Action>::new(), "{b:?} on layout {i}");
                 }
             }
         }
@@ -2608,9 +3462,31 @@ mod tests {
     }
 
     #[test]
+    fn alt_p_opens_phototools_and_leaves_move_lock_and_preferences_alone() {
+        let kb = KeyBindings::default();
+        let p = Input::key(letter(KeyCode::KeyP));
+        let alt = Mods {
+            alt: true,
+            ..Default::default()
+        };
+        assert_eq!(kb.triggered(&p, alt), Some(Action::Phototools));
+        assert_eq!(kb.triggered(&p, Mods { ctrl: true, ..alt }), Some(Action::MoveLock));
+        assert_eq!(
+            kb.triggered(
+                &p,
+                Mods {
+                    ctrl: true,
+                    ..Default::default()
+                }
+            ),
+            Some(Action::Preferences)
+        );
+    }
+
+    #[test]
     fn resync_shortcut_does_not_walk_back_or_take_snapshot_and_sit_keys() {
         let kb = KeyBindings::default();
-        let input = Input::key(KeyCode::KeyS);
+        let input = Input::key(letter(KeyCode::KeyS));
         let mods = Mods {
             ctrl: true,
             ..Default::default()

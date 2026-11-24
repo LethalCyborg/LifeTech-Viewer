@@ -497,7 +497,11 @@ impl Editor {
             }
         }
         ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
-        tip(lifetech_i18n::tr!("poser-click-to-pose", name = subjects::subject_short_name(world, id)).to_string());
+        tip(lifetech_i18n::tr!(
+            "poser-click-to-pose",
+            name = subjects::subject_short_name(world, &self.poser.subject_names, id)
+        )
+        .to_string());
         Hint::Avatar(id)
     }
 }

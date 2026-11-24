@@ -156,7 +156,7 @@ impl FriendPromptUi {
                             }
                             // the name not known yet: the toast's own title
                             None => {
-                                super::notifications::text::show(ui, p, &n.title, &n.name_links, 15.0, p.ink, false, true);
+                                super::notifications::text::show(ui, p, &n.title, &n.name_links, 15.0, p.ink, false, true, n.kind.names());
                             }
                         }
                         let message = n.body.trim();
@@ -169,7 +169,17 @@ impl FriendPromptUi {
                                 .show(ui, |ui| {
                                     ui.set_width(ui.available_width());
                                     egui::ScrollArea::vertical().max_height(96.0).show(ui, |ui| {
-                                        super::notifications::text::show(ui, p, message, &n.name_links, 12.5, p.ink, false, true);
+                                        super::notifications::text::show(
+                                            ui,
+                                            p,
+                                            message,
+                                            &n.name_links,
+                                            12.5,
+                                            p.ink,
+                                            false,
+                                            true,
+                                            n.kind.names(),
+                                        );
                                     });
                                 });
                         }
