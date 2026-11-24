@@ -17,6 +17,7 @@ use crate::ui::{menu, widgets};
 use crate::world::group_money::GroupMoneyData;
 use crate::world::worldmap::WorldMap;
 use egui::{Color32, FontId, Pos2, Rect, Sense, Vec2};
+use lifetech_i18n::UiUpper;
 use lifetech_net::GroupMembership;
 use lifetech_net::group_money::{AccountBody, AccountLine, AccountSummary, GroupParcel, LandTotals, Ledger, Transaction, trans};
 use uuid::Uuid;
@@ -223,7 +224,7 @@ fn head_label(ui: &egui::Ui, p: &Palette, text: &str, cell: Rect, right: bool) {
     let mut job = egui::text::LayoutJob::default();
     let mut format = crate::ui::fonts::semibold_format(&crate::ui::fonts::semibold(ui.ctx()), 10.5, p.muted_dim);
     format.extra_letter_spacing = 0.4;
-    job.append(&text.to_uppercase(), 0.0, format);
+    job.append(&text.ui_upper(), 0.0, format);
     let galley = ui.painter().layout_job(job);
     let x = if right {
         cell.right() - 8.0 - galley.size().x

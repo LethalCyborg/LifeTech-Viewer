@@ -13,6 +13,7 @@ use crate::snapshot::portrait::{Angle, Backdrop, Framing, HdOffer, HdSide, Light
 use crate::theme::Palette;
 use crate::ui::fonts;
 use egui::{Align2, Rect, RichText, Sense, Vec2};
+use lifetech_i18n::UiUpper;
 
 /// The auto portrait's window.
 pub const WINDOW: &str = "outfit_portrait";
@@ -687,7 +688,7 @@ pub fn photo_mode(ctx: &egui::Context, p: &Palette, settings: &mut PortraitSetti
             ui.set_width(230.0);
             ui.spacing_mut().item_spacing.y = 8.0;
             ui.label(
-                RichText::new(lifetech_i18n::tr!("ui-appearance-portrait-vf-helpers").to_uppercase())
+                RichText::new(lifetech_i18n::tr!("ui-appearance-portrait-vf-helpers").ui_upper())
                     .size(11.0)
                     .family(fonts::semibold(ui.ctx()))
                     .color(p.muted),
@@ -761,7 +762,7 @@ pub fn photo_mode(ctx: &egui::Context, p: &Palette, settings: &mut PortraitSetti
             ui.set_width(230.0);
             ui.spacing_mut().item_spacing.y = 8.0;
             ui.label(
-                RichText::new(lifetech_i18n::tr!("ui-appearance-portrait-vf-how").to_uppercase())
+                RichText::new(lifetech_i18n::tr!("ui-appearance-portrait-vf-how").ui_upper())
                     .size(11.0)
                     .family(fonts::semibold(ui.ctx()))
                     .color(p.muted),

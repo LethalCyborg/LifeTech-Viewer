@@ -199,14 +199,17 @@ impl TeleportHistory {
         self.items.get(self.current + 1)
     }
 
-    /// Where the Back arrow leads, when it leads somewhere: a place @showloc
-    /// hid is no destination (`go_to`).
+    /// The place the Back arrow leads to, None when there is none before
+    /// this one. LLNavigationBar::onTeleportHistoryChanged
+    /// (indra/newview/llnavigationbar.cpp) enables the arrows from the
+    /// current index alone: a place @showloc hid keeps its arrow, under the
+    /// name it was given (`TpEntry::hidden`).
     pub fn back_name(&self) -> Option<String> {
-        self.previous().filter(|e| !e.is_hidden()).map(|e| e.region.clone())
+        self.previous().map(|e| e.region.clone())
     }
 
     pub fn forward_name(&self) -> Option<String> {
-        self.next().filter(|e| !e.is_hidden()).map(|e| e.region.clone())
+        self.next().map(|e| e.region.clone())
     }
 
     /// Start travelling back; returns the destination.
@@ -218,15 +221,19 @@ impl TeleportHistory {
         self.go_to(self.current + 1)
     }
 
-    /// LLTeleportHistory::goToItem: start travelling to the place `i` of
-    /// the list; none for the place we are in or past the end, nor for a
-    /// place @showloc hid (the Legacy Viewer asks for a teleport to the
-    /// global position zero, which the grid refuses).
+    /// LLTeleportHistory::goToItem (indra/newview/llteleporthistory.cpp):
+    /// start travelling to the place `i` of the list; none for the place we
+    /// are in or past the end. A place @showloc hid is asked for like
+    /// another: goToItem hands its zeroed global position to
+    /// LLAgent::teleportViaLocation (indra/newview/llagent.cpp), which sends
+    /// a TeleportLocationRequest for the region handle 0 at the position
+    /// zero. The grid refuses it, and the failure leaves the list where it
+    /// was (`failed`).
     pub fn go_to(&mut self, i: usize) -> Option<TpEntry> {
         if i == self.current {
             return None;
         }
-        let e = self.items.get(i).filter(|e| !e.is_hidden()).cloned()?;
+        let e = self.items.get(i).cloned()?;
         self.pending = Some(i);
         Some(e)
     }
@@ -459,10 +466,20 @@ fn write_file(path: &std::path::Path, file: &[u8]) -> std::io::Result<()> {
 }
 
 /// One publisher per account file, shared across session and World resets.
+/// A refused write keeps its snapshot pending (a new session of the account
+/// reads it from here) and is tried again, waiting longer each time
+/// (`save_retry`), or at once with the newer snapshot when the wait ends;
+/// the exit's [`finish_writes`] makes the last try. The Legacy Viewer's
+/// LLTeleportHistoryStorage::save writes once and warns.
 #[derive(Default)]
 struct Writers {
     pending: Mutex<HashMap<PathBuf, Arc<Vec<u8>>>>,
     finished: Condvar,
+    /// Wakes a publisher waiting to try a refused write again.
+    wake: Condvar,
+    /// The exit waits for the writes: a refused one is tried once more,
+    /// then given up.
+    closing: std::sync::atomic::AtomicBool,
 }
 
 impl Writers {
@@ -495,21 +512,54 @@ impl Writers {
     }
 
     fn publish(&self, path: &Path, mut bytes: Arc<Vec<u8>>, mut write: impl FnMut(&Path, &[u8]) -> std::io::Result<()>) {
+        use std::sync::atomic::Ordering;
+        let mut backoff = crate::save_retry::Backoff::default();
         loop {
-            if let Err(e) = write(path, &bytes) {
-                log::warn!("can't save the teleport history: {e}");
-            }
+            let written = write(path, &bytes);
             let mut pending = self.pending.lock().unwrap_or_else(|p| p.into_inner());
-            let latest = pending
-                .get(path)
-                .expect("the publishing thread owns this path until its last write");
-            if Arc::ptr_eq(latest, &bytes) {
-                pending.remove(path);
-                self.finished.notify_all();
-                return;
+            let newer = |pending: &HashMap<PathBuf, Arc<Vec<u8>>>| pending.get(path).is_some_and(|latest| !Arc::ptr_eq(latest, &bytes));
+            if let Err(e) = written {
+                if self.closing.load(Ordering::Acquire) && !newer(&pending) {
+                    log::warn!("can't save the teleport history at exit: {e}");
+                    pending.remove(path);
+                    self.finished.notify_all();
+                    return;
+                }
+                let wait = backoff.failed(std::time::Instant::now());
+                log::warn!("can't save the teleport history ({e}); tried again in {} s", wait.as_secs());
+                // the exit ends the wait early; a newer snapshot waits for it
+                pending = self
+                    .wake
+                    .wait_timeout_while(pending, wait, |_| !self.closing.load(Ordering::Acquire))
+                    .unwrap_or_else(|p| p.into_inner())
+                    .0;
+            } else {
+                backoff.succeeded();
+                if !newer(&pending) {
+                    pending.remove(path);
+                    self.finished.notify_all();
+                    return;
+                }
             }
-            bytes = latest.clone();
+            bytes = pending
+                .get(path)
+                .expect("the publishing thread owns this path until its last write")
+                .clone();
         }
+    }
+
+    /// The exit: every write still pending ends, a refused one after one
+    /// more try.
+    fn close(&self) {
+        use std::sync::atomic::Ordering;
+        self.closing.store(true, Ordering::Release);
+        {
+            // under the lock, so that a publisher about to wait sees it
+            let _pending = self.pending.lock().unwrap_or_else(|p| p.into_inner());
+            self.wake.notify_all();
+        }
+        self.wait(None);
+        self.closing.store(false, Ordering::Release);
     }
 
     fn wait(&self, path: Option<&Path>) {
@@ -533,7 +583,7 @@ fn writers() -> &'static Arc<Writers> {
 /// Called after the viewer window has closed. An orderly exit, including a
 /// restart into VR, waits for the final atomic publication for every account.
 pub fn finish_writes() {
-    writers().wait(None);
+    writers().close();
 }
 
 /// Accordion sections of the history (panel_teleport_history.xml).
@@ -720,9 +770,10 @@ mod tests {
     }
 
     /// LLTeleportHistory::updateCurrentLocation under @showloc: however many
-    /// teleports, the session holds one hidden place, which leads nowhere.
+    /// teleports, the session holds one hidden place; its arrow asks for the
+    /// zeroed place it keeps (LLTeleportHistory::goToItem).
     #[test]
-    fn rlva_hidden_arrivals_share_one_place_with_no_way_back() {
+    fn rlva_hidden_arrivals_share_one_place_that_leads_nowhere() {
         let mut h = TeleportHistory::default();
         h.arrived(e("A"));
         h.arrived(e("B"));
@@ -752,10 +803,19 @@ mod tests {
         let s = h.session();
         assert_eq!((s.items.len(), s.current, s.items[0].region.as_str()), (2, 0, "A"));
         assert!(!s.items[0].is_hidden());
-        // the hidden place ahead is shown, and is no destination
+        // the hidden place ahead keeps its arrow (LLNavigationBar::
+        // onTeleportHistoryChanged looks at the index alone), and the click
+        // asks for what it holds: the region handle 0 at the position zero
         assert!(h.next().is_some_and(TpEntry::is_hidden));
-        assert!(h.forward_name().is_none());
-        assert!(h.go_forward().is_none() && h.go_to(1).is_none());
+        assert_eq!(h.forward_name().as_deref(), Some("(Hidden)"));
+        for asked in [h.go_forward(), h.go_to(1)] {
+            let asked = asked.expect("a hidden place is asked for like another");
+            assert_eq!((asked.handle, asked.position, asked.grid), (0, Vec3::ZERO, None));
+            // the grid refuses it: we are still at A, the list as it was
+            h.failed();
+            let s = h.session();
+            assert_eq!((s.items.len(), s.current, s.items[0].region.as_str()), (2, 0, "A"));
+        }
         h.arrived(TpEntry::hidden("(Hidden)", 5));
         // that arrival was no trip in the list: it takes the place of A
         let s = h.session();
@@ -1023,6 +1083,34 @@ mod tests {
         assert!(writers().snapshot(&path).is_none());
         let items = HistoryStorage::load(path.clone()).items;
         assert_eq!(items.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(), ["First", "Second"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A refused write keeps its snapshot (a new session reads it) and the
+    /// exit's wait tries it once more, which goes through.
+    #[test]
+    fn a_refused_save_stays_pending_and_is_tried_again_at_exit() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let dir = std::env::temp_dir().join(format!("aurora-tphist-refused-{}", uuid::Uuid::new_v4()));
+        let path = dir.join(TELEPORT_HISTORY_FILE);
+        let writers = Arc::new(Writers::default());
+        let tries = Arc::new(AtomicUsize::new(0));
+        let counted = tries.clone();
+        writers.queue(path.clone(), b"visits".to_vec(), move |path, bytes| {
+            if counted.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+            }
+            write_file(path, bytes)
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while tries.load(Ordering::SeqCst) < 1 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(writers.snapshot(&path).as_deref().map(Vec::as_slice), Some(&b"visits"[..]), "kept");
+        writers.close();
+        assert_eq!(tries.load(Ordering::SeqCst), 2);
+        assert!(writers.snapshot(&path).is_none());
+        assert_eq!(std::fs::read(&path).unwrap(), b"visits");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

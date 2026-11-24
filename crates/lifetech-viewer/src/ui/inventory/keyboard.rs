@@ -3,41 +3,26 @@
 //! sibling selections without selecting an open folder's children as well.
 //! Right opens the current folder; Left closes it, or from an item or a
 //! closed folder selects the parent row (a second Left then closes it).
-//! Typed letters jump to the next row whose name starts with them
-//! (LLFolderView::handleUnicodeCharHere's type-ahead), not to the search.
-//! LifeTech: Home and End select the first and last row, Page Up and Page
-//! Down a page of rows away (the Legacy Viewer only scrolls there), Shift
-//! extending the selection; with nothing selected, Down starts at the first
-//! row and Up at the last.
 
+use super::shortcuts;
 use super::*;
 
 /// Run after rebuilding the displayed order and before laying out its viewport,
 /// including while Aurora's explorer has swapped its flat tree into `plain`.
 pub(super) fn navigate(ui: &egui::Ui, inv: &Inventory, st: &mut InventoryUi, filtered: bool) -> bool {
-    // The explorer lists one folder flat (the Legacy Viewer's single folder
-    // mode): its folders never open in place, so Left and Right stay unused.
-    let explorer = st.aurora.is_some_and(|frame| frame.explorer);
-    st.shown_order = if filtered {
-        ShownOrder::Results
-    } else if explorer {
-        ShownOrder::Flat
-    } else {
-        ShownOrder::Plain
-    };
+    // The explorer and the Legacy-style single folder window list one folder
+    // flat (the Legacy Viewer's single folder mode): its folders never open
+    // in place, so Left and Right stay unused.
+    let explorer = st.lists_flat();
+    st.shown_order = order_kind(st, filtered);
     let selected_after_delete = delete::reconcile_selection(inv, st);
     if !clipboard::list_has_focus(ui, st) || st.rename.is_some() {
         return selected_after_delete;
     }
+    let selected_by_key = select_keys::handle(ui, inv, st, explorer);
     let mut keys = Vec::new();
-    let mut typed = String::new();
-    let now = ui.input(|input| input.time);
     ui.input_mut(|input| {
         input.events.retain(|event| {
-            if let egui::Event::Text(text) = event {
-                typed.push_str(text);
-                return false;
-            }
             if let egui::Event::Key {
                 key,
                 pressed: true,
@@ -53,10 +38,6 @@ pub(super) fn navigate(ui: &egui::Ui, inv: &Inventory, st: &mut InventoryUi, fil
                     egui::Key::ArrowDown => Arrow::Down,
                     egui::Key::ArrowLeft if !explorer => Arrow::Left,
                     egui::Key::ArrowRight if !explorer => Arrow::Right,
-                    egui::Key::Home => Arrow::Home,
-                    egui::Key::End => Arrow::End,
-                    egui::Key::PageUp => Arrow::PageUp,
-                    egui::Key::PageDown => Arrow::PageDown,
                     _ => return true,
                 };
                 keys.push((arrow, modifiers.shift));
@@ -66,17 +47,122 @@ pub(super) fn navigate(ui: &egui::Ui, inv: &Inventory, st: &mut InventoryUi, fil
             }
         });
     });
-    let jumped = !typed.is_empty() && type_ahead(inv, st, filtered, &typed, now);
-    let page = (ui.available_height() / super::rows::row_height(st)).floor().max(1.0) as usize;
-    let navigated = !keys.is_empty() || jumped;
+    let navigated = !keys.is_empty();
+    if navigated {
+        select_keys::adopt_focus(st);
+    }
     for (arrow, shift) in keys {
         match arrow {
             Arrow::Up | Arrow::Down => step(inv, st, filtered, arrow == Arrow::Down, shift),
             Arrow::Left | Arrow::Right => fold(inv, st, filtered, arrow == Arrow::Right),
-            Arrow::Home | Arrow::End | Arrow::PageUp | Arrow::PageDown => jump(st, filtered, arrow, page, shift),
         }
     }
-    navigated || selected_after_delete
+    navigated || selected_after_delete || selected_by_key
+}
+
+/// The list's file-manager commands that act on the selection: a new
+/// folder (Ctrl+Shift+N, then its name typed as `created_selection` does
+/// for the New menu), its properties (Alt+Enter), Shift+Delete, and the
+/// history's Ctrl+Z / Ctrl+Y.
+///
+/// Shift+Delete purges (PurgeSelectedItems, with its confirmation that has
+/// no "don't ask again") only what is already in the Trash: Second Life
+/// only purges from there (LLInvFVBridge::isItemRemovable /
+/// "Purge Item"), so anywhere else it moves to the Trash as Delete does.
+/// Windows Explorer's Shift+Delete deletes anywhere; the Second Life rule
+/// wins.
+pub(super) fn commands(
+    ui: &mut egui::Ui,
+    inv: &Inventory,
+    root: Uuid,
+    st: &mut InventoryUi,
+    prefs: &InventoryPreferences,
+    facts: &Facts,
+    actions: &mut Vec<InvAction>,
+) {
+    let wanted = |c: shortcuts::Command| {
+        matches!(
+            c,
+            shortcuts::Command::NewFolder
+                | shortcuts::Command::Properties
+                | shortcuts::Command::Purge
+                | shortcuts::Command::ContextMenu
+                | shortcuts::Command::Refresh
+                | shortcuts::Command::Undo
+                | shortcuts::Command::Redo
+        )
+    };
+    for command in shortcuts::take(ui, wanted) {
+        match command {
+            shortcuts::Command::NewFolder => {
+                let (to, in_all) = st.new_folder_target(inv, root, st.aurora.map(|frame| frame.layout));
+                if st.pending.is_some() || !rules::destination(inv, to) {
+                    continue;
+                }
+                context::new_folder(st, actions, to, in_all);
+            }
+            // Explorer's Alt+Enter: the item's properties in a window of
+            // its own, as many as asked for, the list free behind them
+            shortcuts::Command::Properties => {
+                if let Some(id) = st.selected.filter(|id| st.selection.contains(id)) {
+                    context_catalog::properties_windows(st, vec![id]);
+                }
+            }
+            // Shift+F10: the selection's menu at its row, else the menu of
+            // the explorer's empty space (Windows' keyboard menu)
+            shortcuts::Command::ContextMenu if st.aurora.is_some() => {
+                let explorer = st.aurora.is_some_and(|frame| frame.layout != aurora::Layout::Compact);
+                match st.selected.filter(|id| st.selection.contains(id)) {
+                    Some(id) => {
+                        let at = st.selected_rect.map_or_else(|| ui.max_rect().center(), |rect| rect.left_bottom());
+                        st.row_menu = Some((id, at));
+                        st.background_menu = false;
+                    }
+                    None if explorer && st.tab == 0 => {
+                        st.row_menu = Some((root, ui.max_rect().center()));
+                        st.background_menu = true;
+                    }
+                    None => {}
+                }
+            }
+            // F5 in the tree and the Legacy-style window: "Reload folder" of
+            // the selected folder (the explorer's own F5 reloads the folder
+            // shown, `aurora::history`)
+            shortcuts::Command::Refresh => {
+                let folder = st.selected.filter(|id| inv.folders.contains_key(id)).unwrap_or(root);
+                if folder != inv.root && folder != inv.lib_root && inv.folders.contains_key(&folder) {
+                    st.message.clear();
+                    actions.push(InvAction::Preview(folder, Some(clipboard::focus_id(st))));
+                }
+            }
+            shortcuts::Command::Purge => purge(inv, st, prefs, facts, actions),
+            // the history is the session's, not this list's: the app takes
+            // its next step (`world::inventory::undo`)
+            // while a change is on its way the app says to wait
+            shortcuts::Command::Undo | shortcuts::Command::Redo => {
+                actions.push(InvAction::History {
+                    undo: command == shortcuts::Command::Undo,
+                    named: false,
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Shift+Delete: what is in the Trash is purged after its confirmation,
+/// anything else goes to the Trash as Delete does (see `commands`).
+pub(super) fn purge(inv: &Inventory, st: &mut InventoryUi, prefs: &InventoryPreferences, facts: &Facts, actions: &mut Vec<InvAction>) {
+    let ids: Vec<Uuid> = st.selection.iter().copied().collect();
+    if ids.is_empty() || st.pending.is_some() || st.pending_delete.is_some() {
+        return;
+    }
+    let in_trash = ids.iter().all(|id| rules::in_type(inv, *id, 14));
+    if in_trash && delete::allowed(inv, &ids, prefs, facts) {
+        st.dialog = Some(EditDialog::Delete(ids, true));
+    } else {
+        delete::request(inv, st, prefs, facts, actions);
+    }
 }
 
 /// The rows the list drew last: the plain tree, Aurora's explorer folder or
@@ -87,6 +173,20 @@ pub(super) enum ShownOrder {
     Plain,
     Flat,
     Results,
+}
+
+/// Which list holds the rows shown. Only Aurora's explorer keeps its rows in
+/// `flat` (swapped in while it draws); the Legacy-style single folder window
+/// lists its folder in `plain`, like the tree, so that a delete there finds
+/// the next row (LLFolderView::getNextUnselectedItem).
+pub(super) fn order_kind(st: &InventoryUi, filtered: bool) -> ShownOrder {
+    if filtered {
+        ShownOrder::Results
+    } else if st.aurora.is_some_and(|frame| frame.explorer) {
+        ShownOrder::Flat
+    } else {
+        ShownOrder::Plain
+    }
 }
 
 /// The actual displayed order, including when the explorer temporarily swaps
@@ -150,14 +250,18 @@ fn open_selected(inv: &Inventory, st: &mut InventoryUi, prefs: &InventoryPrefere
             }
         }
         if inv.folders.contains_key(&id) {
-            // The explorer steps into a folder; anywhere else Enter folds it.
-            if st.aurora.is_some_and(|frame| frame.explorer) {
+            // A single folder list steps into a folder; anywhere else Enter
+            // folds it.
+            if st.lists_flat() {
                 st.browse = id;
                 st.selection.clear();
                 st.selected = None;
             } else if st.result_view() {
-                st.result_tree.toggle(id, st.tab);
-            } else {
+                // a folder without a caret stays shut (`rows::branches`)
+                if st.result_tree.folds(id) {
+                    st.result_tree.toggle(id, st.tab);
+                }
+            } else if st.plain.folds(id) {
                 st.plain.set_open(id, !st.plain.is_open(id));
             }
         } else {
@@ -166,110 +270,12 @@ fn open_selected(inv: &Inventory, st: &mut InventoryUi, prefs: &InventoryPrefere
     }
 }
 
-/// A pause this long starts a new word.
-const TYPE_AHEAD_PAUSE: f64 = 1.0;
-
-/// Add `typed` to the word being typed and select the first row, from the
-/// current one down and then from the top, whose name starts with it (any
-/// case). The same letter again goes on to the next row starting with it.
-/// Returns whether a row was selected.
-fn type_ahead(inv: &Inventory, st: &mut InventoryUi, filtered: bool, typed: &str, now: f64) -> bool {
-    let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-    let (word, at) = &mut st.type_ahead;
-    if now - *at > TYPE_AHEAD_PAUSE {
-        word.clear();
-    }
-    *at = now;
-    // A space only within a word: alone it is not a name's start.
-    word.push_str(if word.is_empty() { typed.trim_start() } else { &typed });
-    if word.is_empty() {
-        return false;
-    }
-    let word = word.to_lowercase();
-    let mut letters = word.chars();
-    let first = letters.next();
-    // "bbb" steps through the rows starting with b.
-    let repeat = letters.all(|c| Some(c) == first);
-    let prefix = if repeat {
-        &word[..first.map_or(0, char::len_utf8)]
-    } else {
-        word.as_str()
-    };
-    let order = if filtered { &st.result_tree.order } else { &st.plain.order };
-    let current = st
-        .selected
-        .filter(|id| st.selection.contains(id))
-        .and_then(|id| order.iter().position(|row| *row == id));
-    // A new single letter or a repeat moves on; a longer word may stay put.
-    let start = match current {
-        Some(index) if repeat => index + 1,
-        Some(index) => index,
-        None => 0,
-    };
-    let found = (0..order.len())
-        .map(|step| order[(start + step) % order.len()])
-        .find(|id| super::folder_name(inv, *id).to_lowercase().starts_with(prefix));
-    let Some(found) = found else {
-        return false;
-    };
-    st.selection.clear();
-    st.selection.insert(found);
-    st.anchor = Some(found);
-    st.selected = Some(found);
-    st.keyboard_selection = true;
-    true
-}
-
 #[derive(Clone, Copy, PartialEq)]
 enum Arrow {
     Up,
     Down,
     Left,
     Right,
-    Home,
-    End,
-    PageUp,
-    PageDown,
-}
-
-/// The row Home, End, Page Up or Page Down goes to from row `from` (none
-/// selected: the top) in a list of `len` rows, `page` rows a page.
-fn jump_target(arrow: Arrow, from: Option<usize>, len: usize, page: usize) -> Option<usize> {
-    let last = len.checked_sub(1)?;
-    Some(match arrow {
-        Arrow::Home => 0,
-        Arrow::End => last,
-        Arrow::PageUp => from.unwrap_or(0).saturating_sub(page),
-        Arrow::PageDown => from.map_or(0, |at| (at + page).min(last)),
-        _ => return None,
-    })
-}
-
-/// LifeTech: Home, End, Page Up and Page Down select a row away; Shift
-/// selects every row between the anchor and it.
-fn jump(st: &mut InventoryUi, filtered: bool, arrow: Arrow, page: usize, shift: bool) {
-    let order = if filtered { &st.result_tree.order } else { &st.plain.order };
-    let current = st.selected.filter(|id| st.selection.contains(id));
-    let from = current.and_then(|id| order.iter().position(|row| *row == id));
-    let Some(to) = jump_target(arrow, from, order.len(), page) else {
-        return;
-    };
-    let target = order[to];
-    let anchor = st
-        .anchor
-        .filter(|_| shift)
-        .and_then(|id| order.iter().position(|row| *row == id).map(|at| (id, at)));
-    if let Some((anchor, at)) = anchor {
-        let range: HashSet<Uuid> = order[at.min(to)..=at.max(to)].iter().copied().collect();
-        st.selection = range;
-        st.anchor = Some(anchor);
-    } else {
-        st.selection.clear();
-        st.selection.insert(target);
-        st.anchor = Some(target);
-    }
-    st.selected = Some(target);
-    st.keyboard_selection = true;
 }
 
 /// KEY_RIGHT / KEY_LEFT of LLFolderView::handleKeyHere, on the current row
@@ -278,7 +284,14 @@ fn fold(inv: &Inventory, st: &mut InventoryUi, filtered: bool, right: bool) {
     let Some(current) = st.selected.filter(|id| st.selection.contains(id)) else {
         return;
     };
-    let folder = inv.folders.contains_key(&current);
+    // A folder without a caret neither opens nor counts as open: Left goes
+    // to its parent (`rows::branches`).
+    let folder = inv.folders.contains_key(&current)
+        && if filtered {
+            st.result_tree.folds(current)
+        } else {
+            st.plain.folds(current)
+        };
     let open = folder
         && if filtered {
             st.result_tree.is_open(current, st.tab)
@@ -319,15 +332,6 @@ pub(super) fn scroll_offset(st: &InventoryUi, index: usize, row_height: f32, pit
 fn step(inv: &Inventory, st: &mut InventoryUi, filtered: bool, down: bool, shift: bool) {
     let order = if filtered { &st.result_tree.order } else { &st.plain.order };
     let Some(current) = st.selected.filter(|id| st.selection.contains(id)) else {
-        // LifeTech: nothing selected, Down starts at the first row and Up at
-        // the last, so the keys work before any click (Shift still waits for
-        // a row to start from)
-        if !shift && let Some(&row) = if down { order.first() } else { order.last() } {
-            st.selection = HashSet::from([row]);
-            st.anchor = Some(row);
-            st.selected = Some(row);
-            st.keyboard_selection = true;
-        }
         return;
     };
     let Some(index) = order.iter().position(|id| *id == current) else {
@@ -368,33 +372,6 @@ fn step(inv: &Inventory, st: &mut InventoryUi, filtered: bool, down: bool, shift
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn home_end_and_page_keys_go_to_their_rows() {
-        assert_eq!(jump_target(Arrow::Home, Some(5), 10, 3), Some(0));
-        assert_eq!(jump_target(Arrow::End, Some(5), 10, 3), Some(9));
-        assert_eq!(jump_target(Arrow::PageUp, Some(5), 10, 3), Some(2));
-        assert_eq!(jump_target(Arrow::PageUp, Some(1), 10, 3), Some(0));
-        assert_eq!(jump_target(Arrow::PageDown, Some(5), 10, 3), Some(8));
-        assert_eq!(jump_target(Arrow::PageDown, Some(8), 10, 3), Some(9));
-        assert_eq!(jump_target(Arrow::PageDown, None, 10, 3), Some(0), "nothing selected: the top");
-        assert_eq!(jump_target(Arrow::Home, None, 0, 3), None, "an empty list");
-        let id = Uuid::from_u128;
-        let mut st = InventoryUi::default();
-        st.plain.order = (1..=6).map(id).collect();
-        st.selected = Some(id(3));
-        st.selection = HashSet::from([id(3)]);
-        st.anchor = Some(id(3));
-        jump(&mut st, false, Arrow::End, 2, true);
-        assert_eq!(st.selected, Some(id(6)));
-        assert_eq!(
-            st.selection,
-            (3..=6).map(id).collect::<HashSet<_>>(),
-            "Shift+End selects down to the last row"
-        );
-        jump(&mut st, false, Arrow::Home, 2, false);
-        assert_eq!((st.selected, st.selection.len()), (Some(id(1)), 1));
-    }
 
     #[test]
     fn shift_skips_descendants_and_stops_at_sibling_boundaries() {
@@ -467,18 +444,23 @@ mod tests {
             st.selection = HashSet::from([id(n)]);
         };
         let mut st = InventoryUi::default();
+        st.view.prepare(&inv, view::Sort::default());
         // The root (1) is hidden: 10 and 20 are top rows.
-        st.plain.order = vec![id(10), id(20)];
+        let list = |st: &mut InventoryUi| {
+            st.plain.prepare(&st.view, &inv, id(1), false, true);
+            st.plain.order.clone()
+        };
+        assert_eq!(list(&mut st), [id(10), id(20)]);
         select(&mut st, 10);
         fold(&inv, &mut st, false, true);
         assert!(st.plain.is_open(id(10)));
         assert!(!st.plain.is_open(id(20)), "only the current folder opens");
         fold(&inv, &mut st, false, true);
         assert!(st.plain.is_open(id(10)), "Right again keeps it open");
-        st.plain.order = vec![id(10), id(11), id(20)];
+        assert_eq!(list(&mut st), [id(10), id(11), id(20)]);
         select(&mut st, 11);
         fold(&inv, &mut st, false, true);
-        st.plain.order = vec![id(10), id(11), id(12), id(20)];
+        assert_eq!(list(&mut st), [id(10), id(11), id(12), id(20)]);
         select(&mut st, 12);
         fold(&inv, &mut st, false, true);
         assert_eq!(st.selected, Some(id(12)), "Right on an item does nothing");
@@ -497,8 +479,25 @@ mod tests {
         assert_eq!(st.selected, Some(id(10)), "no row above a top folder of a hidden root");
         assert!(!st.plain.is_open(id(1)));
 
+        // An empty folder has no caret: Right leaves it shut, Left climbs.
+        list(&mut st);
+        select(&mut st, 20);
+        fold(&inv, &mut st, false, true);
+        assert!(!st.plain.is_open(id(20)), "Right does not open an empty folder");
+        open_selected(&inv, &mut st, &InventoryPreferences::default(), &Facts::default(), &mut Vec::new());
+        assert!(!st.plain.is_open(id(20)), "nor does Enter");
+
         // A search's result tree keeps its own open state per tab.
         st.result_tree.order = vec![id(10), id(11), id(12)];
+        st.result_tree.rows = [(10, true), (11, true), (12, false)]
+            .map(|(n, folder)| view::TreeRow {
+                id: id(n),
+                depth: 0,
+                folder,
+                open: folder,
+                branches: folder,
+            })
+            .to_vec();
         select(&mut st, 11);
         assert!(st.result_tree.is_open(id(11), st.tab));
         fold(&inv, &mut st, true, false);
@@ -509,52 +508,6 @@ mod tests {
         fold(&inv, &mut st, true, true);
         fold(&inv, &mut st, true, false);
         assert!(!st.result_tree.is_open(id(10), st.tab));
-    }
-
-    #[test]
-    fn typed_letters_jump_to_rows_starting_with_them() {
-        let id = Uuid::from_u128;
-        let mut inv = Inventory::default();
-        let names = [
-            (10, "Animations"),
-            (20, "Body Parts"),
-            (30, "Clothing"),
-            (40, "Bodies"),
-            (50, "Calling Cards"),
-        ];
-        inv.created_folders(
-            names
-                .map(|(n, name)| lifetech_net::inventory::InvFolder {
-                    id: id(n),
-                    parent: id(1),
-                    name: name.into(),
-                    ..Default::default()
-                })
-                .to_vec(),
-        );
-        let mut st = InventoryUi::default();
-        st.plain.order = vec![id(10), id(20), id(30), id(40), id(50)];
-        assert!(type_ahead(&inv, &mut st, false, "c", 0.0));
-        assert_eq!(st.selection, HashSet::from([id(30)]), "no selection: the first match");
-        assert!(type_ahead(&inv, &mut st, false, "a", 0.2));
-        assert_eq!(st.selected, Some(id(50)), "\"ca\" goes on to Calling Cards");
-        assert!(type_ahead(&inv, &mut st, false, "B", 5.0));
-        assert_eq!(st.selected, Some(id(20)), "after a pause a new word, from the top again");
-        assert!(type_ahead(&inv, &mut st, false, "b", 5.3));
-        assert_eq!(st.selected, Some(id(40)), "the same letter again: the next match");
-        assert!(type_ahead(&inv, &mut st, false, "b", 5.6));
-        assert_eq!(st.selected, Some(id(20)), "and round to the first");
-        assert!(type_ahead(&inv, &mut st, false, "bod", 9.0));
-        assert_eq!(st.selected, Some(id(20)), "a word stays on a row that matches it");
-        assert!(type_ahead(&inv, &mut st, false, "y ", 9.2));
-        assert_eq!(st.selected, Some(id(20)), "spaces within a word count");
-        assert!(!type_ahead(&inv, &mut st, false, "x", 12.0));
-        assert_eq!(st.selection, HashSet::from([id(20)]), "no match leaves the selection");
-        assert!(!type_ahead(&inv, &mut st, false, " ", 15.0), "a space alone selects nothing");
-        st.type_ahead = Default::default();
-        st.selection.clear();
-        assert!(type_ahead(&inv, &mut st, false, "bodi", 20.0));
-        assert_eq!(st.selected, Some(id(40)));
     }
 
     #[test]
@@ -727,9 +680,12 @@ mod tests {
             selection: HashSet::from([id(10), id(100)]),
             ..Default::default()
         };
+        st.view.prepare(&inv, view::Sort::default());
+        st.plain.prepare(&st.view, &inv, id(1), false, true);
         let mut actions = Vec::new();
         open_selected(&inv, &mut st, &prefs, &facts, &mut actions);
         assert!(st.plain.is_open(id(10)), "the folder folds open");
+        st.plain.prepare(&st.view, &inv, id(1), false, true);
         assert!(
             matches!(&actions[..], [InvAction::Appearance(Wear::WearItem { item, .. })] if *item == id(100)),
             "the item under it is put on"

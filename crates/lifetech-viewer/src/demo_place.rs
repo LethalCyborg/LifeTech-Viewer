@@ -182,10 +182,15 @@ pub fn teleport_confirm_scenario() -> Option<TeleportConfirm> {
 
 /// RemoteParcelRequest: the parcel of the region holding the slot.
 pub fn remote_parcel(handle: RegionHandle, position: Vec3) -> Vec<NetEvent> {
+    let result = parcel_id(handle);
+    vec![NetEvent::RemoteParcel { handle, position, result }]
+}
+
+pub(super) fn parcel_id(handle: RegionHandle) -> Result<Uuid, RemoteParcelError> {
     let (x, y) = lifetech_net::handle_to_origin(handle);
     let grid = (x / 256, y / 256);
     let (hx, hy) = lifetech_net::handle_to_origin(super::HANDLE);
-    let result = if grid == (hx / 256, hy / 256) {
+    if grid == (hx / 256, hy / 256) {
         Ok(super::land::PARCEL_UUID)
     } else if grid == FAILING {
         Err(RemoteParcelError::Status(404))
@@ -195,8 +200,7 @@ pub fn remote_parcel(handle: RegionHandle, position: Vec3) -> Vec<NetEvent> {
             .find(|p| p.grid == grid)
             .map(|p| p.id)
             .ok_or(RemoteParcelError::NoParcel)
-    };
-    vec![NetEvent::RemoteParcel { handle, position, result }]
+    }
 }
 
 /// RegionHandleRequest for one of the demo regions.
@@ -569,7 +573,16 @@ pub fn folder_contents(folder_id: Uuid, owner: Uuid) -> Option<FolderContents> {
         .map(|(i, (_, name, _, _, created))| {
             let (id, own) = landmark_ids(i);
             // a favourite of a landmark is its copy: the same asset
-            let asset = if n == FAVORITES_FOLDER {
+            let original = (n == FAVORITES_FOLDER)
+                .then(|| landmarks().iter().position(|l| l.0 != FAVORITES_FOLDER && l.1 == *name))
+                .flatten();
+            let link = original.filter(|_| {
+                std::env::var("AURORA_DEMO_PLACES")
+                    .is_ok_and(|v| v.split_once(':').is_some_and(|(_, flags)| flags.split(',').any(|f| f == "links")))
+            });
+            let asset = if let Some(original) = link {
+                landmark_ids(original).0
+            } else if n == FAVORITES_FOLDER {
                 landmarks()
                     .iter()
                     .position(|l| l.0 != FAVORITES_FOLDER && l.1 == *name)
@@ -586,7 +599,7 @@ pub fn folder_contents(folder_id: Uuid, owner: Uuid) -> Option<FolderContents> {
                 } else {
                     String::new()
                 },
-                asset_type: 3,
+                asset_type: if link.is_some() { 24 } else { 3 },
                 inv_type: 3,
                 asset_id: asset,
                 flags: 0,

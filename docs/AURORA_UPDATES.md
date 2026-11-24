@@ -100,3 +100,16 @@ Aurora's name on purpose. Aurora's tests that name its own folders (`#Aurora`,
 The team mark ("LifeTech Team", `world/staff.rs`) lists LifeTech's own
 avatar keys, not Aurora's: when Aurora changes its `TEAM` list, keep
 LifeTech's.
+
+The merge of Aurora 1ea0749c (2026-11-25) took Aurora's own versions of
+three things LifeTech had made first: notecard Find and Replace
+(`ui/inventory/find.rs`, LifeTech's `note_find.rs` removed), inventory
+type-ahead with Home, End, Page Up and Page Down (`ui/inventory/select_keys.rs`)
+and the username after the sender's name in chat (`chat_header_name`).
+LifeTech keeps on top of them: the list takes the keyboard when the
+inventory opens and after a folder is chosen in the explorer's column, the
+newest script prompt waits `close_key::PROMPT_GRACE` seconds before Ctrl+W
+closes it, and the latest-messages button shows only under the mouse.
+Aurora's twelve new languages are rebranded like the others; their
+`cli-help` leaves out `--vr`. New Aurora crates keep their `aurora-` names
+(`aurora-proxy`, `aurora-j2k`, `aurora-editor-sync`): internal only.

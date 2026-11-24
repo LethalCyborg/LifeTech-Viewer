@@ -63,6 +63,7 @@ impl Default for Layout {
                 tb("Command_Search_Icon", "search", lifetech_i18n::tr!("search-title")),
                 tb("Command_Places_Icon", "places", lifetech_i18n::tr!("common-places")),
                 tb("Command_Snapshot_Icon", "snapshot", lifetech_i18n::tr!("photo-title")),
+                tb("movie", "director", lifetech_i18n::tr!("toolbar-command-director")),
                 tb("Command_Map_Icon", "worldmap", lifetech_i18n::tr!("common-world-map")),
                 tb("Command_MiniMap_Icon", "minimap", lifetech_i18n::tr!("common-mini-map")),
                 tb("Command_Performance_Icon", "performance", lifetech_i18n::tr!("common-performance")),
